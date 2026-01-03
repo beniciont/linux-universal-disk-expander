@@ -3,13 +3,12 @@
 # ==============================================================================
 # EXPANSAO OCI LINUX
 # Criado por: Benicio Neto
-# Versão: 2.5.1 (PRODUÇÃO)
+# Versão: 2.5.2 (PRODUÇÃO)
 # Última Atualização: 03/01/2026
 #
 # HISTÓRICO DE VERSÕES:
-# 1.0.0 a 2.4.0 - Evolução e correções de bugs.
-# 2.5.0 (03/01/2026) - Flexibilidade: Aviso de espaço 0 agora permite prosseguir.
-# 2.5.1 (03/01/2026) - Feedback: Aviso claro se o tamanho não mudar após expansão.
+# 1.0.0 a 2.5.1 - Evolução e correções de bugs.
+# 2.5.2 (03/01/2026) - Ajuste na precisão do cálculo de tamanho e mensagens.
 # ==============================================================================
 
 # Configurações de Log
@@ -102,9 +101,9 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " EXPANSAO OCI LINUX v2.5.1 "
+    echo " EXPANSAO OCI LINUX v2.5.2 "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.5.1 (PRODUÇÃO)"
+    echo " Versão: 2.5.2 (PRODUÇÃO)"
     echo " Última Atualização: 03/01/2026 "
     echo "=================================="
     echo
@@ -336,9 +335,10 @@ while true; do
     echo "${GREEN}PASSO 4: Executando expansão ($MODO)${RESET}"
     echo "================================"
     
-    # Captura tamanho ANTES da expansão do FS
+    # Captura tamanho ANTES da expansão (em bytes para precisão total)
     if [[ -n "$MOUNT" && "$MOUNT" != "livre" ]]; then
-        FS_SIZE_BEFORE=$(df -b "$MOUNT" | tail -n1 | awk '{print $2}')
+        # Usamos df -B1 para pegar o tamanho exato em bytes
+        FS_SIZE_BEFORE=$(df -B1 "$MOUNT" | tail -n1 | awk '{print $2}')
     else
         FS_SIZE_BEFORE=$(lsblk -bdno SIZE "$ALVO_NOME" | head -n1)
     fi
@@ -408,20 +408,21 @@ while true; do
             fi
         fi
         
-        # Verificação Final de Tamanho
+        # Verificação Final de Tamanho (em bytes para precisão total)
         if [[ -n "$MOUNT" && "$MOUNT" != "livre" ]]; then
-            FS_SIZE_AFTER=$(df -b "$MOUNT" | tail -n1 | awk '{print $2}')
+            FS_SIZE_AFTER=$(df -B1 "$MOUNT" | tail -n1 | awk '{print $2}')
         else
             FS_SIZE_AFTER=$(lsblk -bdno SIZE "$ALVO_NOME" | head -n1)
         fi
 
-        if [[ "$FS_SIZE_AFTER" -le "$FS_SIZE_BEFORE" ]]; then
+        # Se o tamanho mudou (mesmo que pouco), é SUCESSO.
+        if [[ "$FS_SIZE_AFTER" -gt "$FS_SIZE_BEFORE" ]]; then
+            FINAL_MSG="${GREEN}${BOLD}SUCESSO! Expansão concluída.${RESET}"
+            log_message "SUCCESS" "Expansão realizada: $FS_SIZE_BEFORE -> $FS_SIZE_AFTER bytes."
+        else
+            # Se não mudou nada, avisamos que provavelmente não tinha espaço real.
             FINAL_MSG="${YELLOW}${BOLD}INALTERADO: O tamanho final não mudou. Verifique se há espaço real no disco físico (OCI Console).${RESET}"
             log_message "WARN" "Expansão concluída mas tamanho permaneceu inalterado ($FS_SIZE_AFTER bytes)."
-        elif [[ $EXP_SUCCESS -eq 2 ]]; then
-            FINAL_MSG="${YELLOW}${BOLD}INALTERADO: A partição já ocupa todo o espaço disponível.${RESET}"
-        else
-            FINAL_MSG="${GREEN}${BOLD}SUCESSO! Expansão concluída.${RESET}"
         fi
     else
         FINAL_MSG="${RED}${BOLD}$ERROR_DETAIL${RESET}"
