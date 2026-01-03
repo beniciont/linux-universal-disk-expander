@@ -258,12 +258,17 @@ run_action() {
     fi
 
     if [[ "$danger" -eq 1 && "$FORCE" -ne 1 ]]; then
-        echo -n "Confirma execução: ${cmd[*]} ? (s/n): "
+        echo -n "Confirma execução: ${cmd[*]} ? ([ENTER]=sim / n=cancelar / q=sair): "
         read ans
-        if [[ ${ans,,} != "s" ]]; then
-            echo "CANCELLED_BY_USER"
-            return 2
-        fi
+        case ${ans,,} in
+            n|q)
+                echo "CANCELLED_BY_USER"
+                return 2
+                ;;
+            *)
+                # ENTER ou qualquer outra tecla = sim
+                ;;
+        esac
     fi
 
     "${cmd[@]}" 2>&1
