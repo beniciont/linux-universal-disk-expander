@@ -3,12 +3,13 @@
 # ==============================================================================
 # EXPANSAO OCI LINUX
 # Criado por: Benicio Neto
-# Versão: 2.5.0 (PRODUÇÃO)
+# Versão: 2.5.1 (PRODUÇÃO)
 # Última Atualização: 03/01/2026
 #
 # HISTÓRICO DE VERSÕES:
 # 1.0.0 a 2.4.0 - Evolução e correções de bugs.
 # 2.5.0 (03/01/2026) - Flexibilidade: Aviso de espaço 0 agora permite prosseguir.
+# 2.5.1 (03/01/2026) - Feedback: Aviso claro se o tamanho não mudar após expansão.
 # ==============================================================================
 
 # Configurações de Log
@@ -56,8 +57,8 @@ check_dependencies() {
 # Função para traduzir e padronizar erros
 friendly_error() {
     local raw_msg="$1"
-    if echo "$raw_msg" | grep -qiE "matches existing size|nothing to do"; then
-        echo "AVISO: O volume já possui o tamanho solicitado ou não há novo espaço para adicionar."
+    if echo "$raw_msg" | grep -qiE "matches existing size|nothing to do|NOCHANGE"; then
+        echo "INALTERADO: O volume já possui o tamanho solicitado ou não há novo espaço."
     elif echo "$raw_msg" | grep -qiE "insufficient free space|not enough free space"; then
         echo "ERRO: Não há espaço livre disponível no disco físico para esta expansão."
     elif echo "$raw_msg" | grep -qi "no tools available.*gpt"; then
@@ -101,9 +102,9 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " EXPANSAO OCI LINUX v2.5.0 "
+    echo " EXPANSAO OCI LINUX v2.5.1 "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.5.0 (PRODUÇÃO)"
+    echo " Versão: 2.5.1 (PRODUÇÃO)"
     echo " Última Atualização: 03/01/2026 "
     echo "=================================="
     echo
@@ -275,7 +276,7 @@ while true; do
             read VALOR
             [[ $VALOR != +* ]] && VALOR="+$VALOR"
             TAMANHO_EXPANSAO="$VALOR"
-            if [[ $VALOR == *%* ]]; then LVM_PARAM="-l"; else LVM_PARAM="-L"; fi
+            LVM_PARAM="-L"
         else
             TAMANHO_EXPANSAO="+100%FREE"
             LVM_PARAM="-l"
@@ -335,6 +336,13 @@ while true; do
     echo "${GREEN}PASSO 4: Executando expansão ($MODO)${RESET}"
     echo "================================"
     
+    # Captura tamanho ANTES da expansão do FS
+    if [[ -n "$MOUNT" && "$MOUNT" != "livre" ]]; then
+        FS_SIZE_BEFORE=$(df -b "$MOUNT" | tail -n1 | awk '{print $2}')
+    else
+        FS_SIZE_BEFORE=$(lsblk -bdno SIZE "$ALVO_NOME" | head -n1)
+    fi
+
     EXP_SUCCESS=0
     ERROR_DETAIL=""
 
@@ -400,7 +408,17 @@ while true; do
             fi
         fi
         
-        if [[ $EXP_SUCCESS -eq 2 ]]; then
+        # Verificação Final de Tamanho
+        if [[ -n "$MOUNT" && "$MOUNT" != "livre" ]]; then
+            FS_SIZE_AFTER=$(df -b "$MOUNT" | tail -n1 | awk '{print $2}')
+        else
+            FS_SIZE_AFTER=$(lsblk -bdno SIZE "$ALVO_NOME" | head -n1)
+        fi
+
+        if [[ "$FS_SIZE_AFTER" -le "$FS_SIZE_BEFORE" ]]; then
+            FINAL_MSG="${YELLOW}${BOLD}INALTERADO: O tamanho final não mudou. Verifique se há espaço real no disco físico (OCI Console).${RESET}"
+            log_message "WARN" "Expansão concluída mas tamanho permaneceu inalterado ($FS_SIZE_AFTER bytes)."
+        elif [[ $EXP_SUCCESS -eq 2 ]]; then
             FINAL_MSG="${YELLOW}${BOLD}INALTERADO: A partição já ocupa todo o espaço disponível.${RESET}"
         else
             FINAL_MSG="${GREEN}${BOLD}SUCESSO! Expansão concluída.${RESET}"
