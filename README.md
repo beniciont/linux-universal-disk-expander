@@ -5,7 +5,7 @@
 **EXPANSAO OCI LINUX**
 
 Criado por: Benicio Neto  
-Versão: 2.5.7 (PRODUÇÃO)  
+Versão: 2.6.0 (PRODUÇÃO)  
 Última Atualização: 03/01/2026
 
 Um utilitário interativo para detectar e aplicar expansão de disco em instâncias Linux na OCI (Oracle Cloud Infrastructure). O script automatiza o rescan do kernel, ajuste de partições (growpart/parted), LVM e redimensionamento de sistemas de arquivos (XFS/ext4), e exibe um status final claro.
