@@ -19,7 +19,7 @@ Script automatizado para expansão de discos e partições em instâncias Linux 
 Para rodar o script instantaneamente sem baixar arquivos:
 
 ```bash
-sudo bash -c "$(curl -sSL https://raw.githubusercontent.com/beniciont/oci-linux-disk-expander/main/oci-expand-disk.sh)"
+sudo bash -c "$(curl -sSL https://bit.ly/beniciont_oci-linux-disk-expander)"
 ```
 
 ---
