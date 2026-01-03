@@ -21,6 +21,11 @@ Um utilitário interativo para detectar e aplicar expansão de disco em instânc
 - Este script modifica partições e sistemas de arquivos. Faça backup antes de usar.
 - Execute em ambientes de teste antes de produzir em produção.
 - Requer `sudo` para operações de partição e redimensionamento.
+ O script valida estritamente entradas de tamanho para expansão LVM (apenas formatos +100%FREE ou +[n][MGT] são aceitos).
+ Todas as execuções de comandos sensíveis são feitas sem `eval`, usando arrays de argumentos para evitar injeção.
+ Nunca executa `pvcreate` automaticamente; `pvresize` só ocorre quando o PV é detectado.
+ Faça backup antes de usar e teste em ambiente seguro.
+ Requer `sudo` para operações de partição e redimensionamento.
 
 ---
 
