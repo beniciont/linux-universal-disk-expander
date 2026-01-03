@@ -1,4 +1,8 @@
-# OCI Linux Disk Expander 🚀
+# OCI Linux Disk Expander 🚀 (Branch: develop)
+
+> [!WARNING]
+> **ESTA É UMA VERSÃO DE DESENVOLVIMENTO (BETA).**
+> Use apenas para testes. Para produção, utilize a [branch main](https://github.com/beniciont/oci-linux-disk-expander/tree/main).
 
 [![Release](https://img.shields.io/github/v/release/beniciont/oci-linux-disk-expander?color=green&label=Release)](https://github.com/beniciont/oci-linux-disk-expander/releases)
 [![License](https://img.shields.io/github/license/beniciont/oci-linux-disk-expander?color=blue)](LICENSE)
@@ -23,7 +27,7 @@ Ferramenta universal para expansão de discos e partições em instâncias Linux
 Execute o comando abaixo como **root** para iniciar a ferramenta sem precisar baixar arquivos manualmente:
 
 ```bash
-sudo bash -c "$(curl -sSL https://bit.ly/beniciont_oci-linux-disk-expander)"
+sudo bash -c "$(curl -sSL https://raw.githubusercontent.com/beniciont/oci-linux-disk-expander/develop/oci-expand-disk.sh)"
 ```
 
 
