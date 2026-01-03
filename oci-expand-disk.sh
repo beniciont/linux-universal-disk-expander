@@ -247,17 +247,18 @@ done
 
 # Executa ações de sistema com suporte a --dry-run e confirmação para operações perigosas
 run_action() {
-    local cmd="$1"
-    local danger=${2:-0}
-    log_message "EXEC" "Comando: $cmd (DRY_RUN=$DRY_RUN FORCE=$FORCE)"
+    local danger="$1"
+    shift
+    local cmd=("$@")
+    log_message "EXEC" "Comando: ${cmd[*]} (DRY_RUN=$DRY_RUN FORCE=$FORCE)"
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
-        echo "[DRY-RUN] $cmd"
+        echo "[DRY-RUN] ${cmd[*]}"
         return 0
     fi
 
     if [[ "$danger" -eq 1 && "$FORCE" -ne 1 ]]; then
-        echo -n "Confirma execução: $cmd ? (s/n): "
+        echo -n "Confirma execução: ${cmd[*]} ? (s/n): "
         read ans
         if [[ ${ans,,} != "s" ]]; then
             echo "CANCELLED_BY_USER"
@@ -265,8 +266,7 @@ run_action() {
         fi
     fi
 
-    # executar comando e retornar saída + código
-    eval "$cmd" 2>&1
+    "${cmd[@]}" 2>&1
     return $?
 }
 
@@ -433,9 +433,18 @@ while true; do
                 if [[ "$SIZE_OPT" == "2" ]]; then
                     echo -n "Digite o valor (ex: 500M ou 5G): "
                     read VALOR
-                    [[ $VALOR != +* ]] && VALOR="+$VALOR"
-                    TAMANHO_EXPANSAO="$VALOR"
-                    LVM_PARAM="-L"
+                    # Validação estrita: +100%FREE ou +[n][MGT]
+                    if [[ "$VALOR" =~ ^\+?100%FREE$ ]]; then
+                        TAMANHO_EXPANSAO="+100%FREE"
+                        LVM_PARAM="-l"
+                    elif [[ "$VALOR" =~ ^\+?[0-9]+[MmGgTt]$ ]]; then
+                        [[ $VALOR != +* ]] && VALOR="+$VALOR"
+                        TAMANHO_EXPANSAO="$VALOR"
+                        LVM_PARAM="-L"
+                    else
+                        echo -e "${RED}Valor inválido! Use formatos: +100%FREE ou +500M, +5G, +1T.${RESET}"
+                        sleep 2; continue
+                    fi
                 else
                     TAMANHO_EXPANSAO="+100%FREE"
                     LVM_PARAM="-l"
@@ -580,7 +589,7 @@ while true; do
 
     if [[ "$MODO" == "LVM" ]]; then
         progress 2 "pvresize /dev/$DISCO..."
-        CMD_OUT=$(run_action "pvresize /dev/$DISCO" 1)
+        CMD_OUT=$(run_action 1 pvresize "/dev/$DISCO")
         RC=$?
         if [[ $RC -eq 2 ]]; then
             ERROR_DETAIL="Operação cancelada pelo usuário."
@@ -588,7 +597,7 @@ while true; do
         else
             # prosseguir para lvextend
             progress 2 "lvextend $LVM_PARAM $TAMANHO_EXPANSAO $ALVO_NOME..."
-            CMD_OUT=$(run_action "lvextend $LVM_PARAM $TAMANHO_EXPANSAO $ALVO_NOME" 1)
+            CMD_OUT=$(run_action 1 lvextend "$LVM_PARAM" "$TAMANHO_EXPANSAO" "$ALVO_NOME")
             RC=$?
             if [[ $RC -eq 0 ]]; then
                 EXP_SUCCESS=1
@@ -604,7 +613,7 @@ while true; do
     else
         if [[ "$METODO_PART" == "parted" ]]; then
             progress 2 "parted resizepart $PART_NUM $TAMANHO_EXPANSAO..."
-            CMD_OUT=$(run_action "bash -c 'echo Yes | sudo parted /dev/$DISCO resizepart $PART_NUM $TAMANHO_EXPANSAO'" 1)
+            CMD_OUT=$(run_action 1 bash -c "echo Yes | sudo parted /dev/$DISCO resizepart $PART_NUM $TAMANHO_EXPANSAO")
             RC=$?
             if [[ $RC -eq 0 ]]; then
                 EXP_SUCCESS=1
@@ -617,9 +626,13 @@ while true; do
             fi
         else
             progress 2 "growpart /dev/$DISCO $PART_NUM..."
-            CMD_OUT=$(run_action "growpart /dev/$DISCO $PART_NUM" 1)
+            # Executa growpart com timeout de 60s para evitar travamento
+            CMD_OUT=$(timeout 60s bash -c 'growpart "/dev/$DISCO" "$PART_NUM"')
             RC=$?
-            if [[ $RC -eq 0 ]]; then
+            if [[ $RC -eq 124 ]]; then
+                ERROR_DETAIL="growpart travou (timeout 60s). Tente parted ou verifique o disco."
+                EXP_SUCCESS=0
+            elif [[ $RC -eq 0 ]]; then
                 EXP_SUCCESS=1
             elif [[ $RC -eq 2 ]]; then
                 ERROR_DETAIL="Operação cancelada pelo usuário."
@@ -627,7 +640,7 @@ while true; do
             else
                 log_message "WARN" "growpart falhou. Tentando fallback com parted..."
                 progress 2 "Fallback: parted resizepart $PART_NUM 100%..."
-                CMD_OUT=$(run_action "bash -c 'echo Yes | sudo parted /dev/$DISCO resizepart $PART_NUM 100%'" 1)
+                CMD_OUT=$(run_action 1 bash -c "echo Yes | sudo parted /dev/$DISCO resizepart $PART_NUM 100%")
                 RC=$?
                 if [[ $RC -eq 0 ]]; then
                     EXP_SUCCESS=1
