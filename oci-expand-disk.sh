@@ -3,12 +3,12 @@
 # ==============================================================================
 # EXPANSAO OCI LINUX - FERRAMENTA UNIVERSAL
 # Criado por: Benicio Neto
-# Versão: 2.7.2 (PRODUÇÃO)
+# Versão: 2.7.3 (PRODUÇÃO)
 # Última Atualização: 03/01/2026
 #
 # HISTÓRICO DE VERSÕES:
-# 1.0.0 a 2.7.1 - Evolução e correções de bugs.
-# 2.7.2 (03/01/2026) - FIX: Captura robusta de tamanho de PV LVM e FS em discos Raw.
+# 1.0.0 a 2.7.2 - Evolução e correções de bugs.
+# 2.7.3 (03/01/2026) - FIX: Nova lógica infalível de detecção de espaço livre (OCI).
 # ==============================================================================
 
 # Configurações de Log
@@ -41,7 +41,7 @@ log_message() {
 
 # Função para instalar dependências
 check_dependencies() {
-    local deps=("gdisk" "util-linux" "parted" "xfsprogs" "e2fsprogs")
+    local deps=("gdisk" "util-linux" "parted" "xfsprogs" "e2fsprogs" "bc")
     for dep in "${deps[@]}"; do
         if ! command -v "$dep" &>/dev/null && [[ "$dep" != "util-linux" ]]; then
             log_message "INFO" "$dep não encontrado. Tentando instalar..."
@@ -59,39 +59,42 @@ check_dependencies() {
 get_unallocated_space() {
     local disk="/dev/$1"
     
+    # Tenta corrigir a tabela de partições GPT se houver espaço no final
     if command -v sgdisk &>/dev/null; then
         sudo sgdisk -e "$disk" >/dev/null 2>&1
     fi
 
     local disk_size_bytes=$(lsblk -bdno SIZE "$disk" | head -n1 | tr -d ' ')
-    local free_bytes=0
+    local used_bytes=0
     
-    # 1. Tenta encontrar o fim da última partição
-    local last_part_end=$(sudo parted -s "$disk" unit B print | grep -E "^ [0-9]+" | tail -n1 | awk '{print $3}' | tr -d 'B')
+    # 1. Verifica se há partições
+    local has_parts=$(lsblk -ln -o TYPE "$disk" | grep -q "part" && echo "yes" || echo "no")
     
-    if [[ -n "$last_part_end" ]]; then
-        free_bytes=$((disk_size_bytes - last_part_end))
+    if [[ "$has_parts" == "yes" ]]; then
+        # Se tem partição, o espaço usado é o fim da última partição
+        used_bytes=$(sudo parted -s "$disk" unit B print | grep -E "^ [0-9]+" | tail -n1 | awk '{print $3}' | tr -d 'B')
     else
-        # 2. Se não houver partição, verifica se é um PV LVM direto no disco
-        # Usamos o pvs com formato específico para evitar erros de unidade
+        # 2. Se não tem partição, verifica se é um PV LVM
         local pv_size=$(sudo pvs --noheadings --units b --options pv_size "$disk" 2>/dev/null | grep -oE "[0-9]+" | head -n1)
         if [[ -n "$pv_size" ]]; then
-            free_bytes=$((disk_size_bytes - pv_size))
+            used_bytes=$pv_size
         else
-            # 3. Se não for LVM, verifica se há um Sistema de Arquivos direto no disco
+            # 3. Se não é LVM, verifica se tem um Sistema de Arquivos direto
             local has_fs=$(lsblk -no FSTYPE "$disk" | head -n1)
             if [[ -n "$has_fs" ]]; then
-                # Se tem FS mas não tem partição, o FS ocupa o disco todo (ou o que o kernel vê)
-                free_bytes=0
+                # Se tem FS direto, assumimos que ele ocupa o que o kernel vê no momento
+                used_bytes=$disk_size_bytes
             else
-                # Disco realmente vazio
-                free_bytes=$disk_size_bytes
+                # Disco vazio
+                used_bytes=0
             fi
         fi
     fi
 
-    # Log de depuração interna
-    log_message "DEBUG" "Cálculo Espaço Livre ($disk): Total=$disk_size_bytes, Usado=${last_part_end:-$pv_size}, Livre=$free_bytes"
+    local free_bytes=$((disk_size_bytes - used_bytes))
+    
+    # Log de depuração
+    log_message "DEBUG" "get_unallocated_space($disk): Total=$disk_size_bytes, Usado=$used_bytes, Livre=$free_bytes"
 
     if [[ "$free_bytes" -lt 1048576 ]]; then
         echo "0"
@@ -103,9 +106,9 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " EXPANSAO OCI LINUX v2.7.2 "
+    echo " EXPANSAO OCI LINUX v2.7.3 "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.7.2 (UNIVERSAL)"
+    echo " Versão: 2.7.3 (PRODUÇÃO)"
     echo " Última Atualização: 03/01/2026 "
     echo "=================================="
     echo
@@ -135,7 +138,7 @@ progress() {
 }
 
 # Início do Script
-log_message "START" "Script Universal v2.7.2 iniciado."
+log_message "START" "Script Universal v2.7.3 iniciado."
 check_dependencies
 
 while true; do
@@ -153,6 +156,7 @@ while true; do
         echo "${RED}ERRO: Disco /dev/$DISCO não encontrado!${RESET}"; sleep 2; continue
     fi
 
+    # Captura o tamanho inicial absoluto para evitar falsos positivos
     TAMANHO_INICIAL_DISCO=$(lsblk -bdno SIZE "/dev/$DISCO" | head -n1 | tr -d ' ')
     TAMANHO_INICIAL_HUMANO=$(lsblk -dno SIZE "/dev/$DISCO" | head -n1)
     
@@ -172,21 +176,22 @@ while true; do
         progress 2 "Sincronizando partições..."
         sudo partprobe "/dev/$DISCO" >/dev/null 2>&1
         
-        TAMANHO_DEPOIS_RESCAN=$(lsblk -bdno SIZE "/dev/$DISCO" | head -n1 | tr -d ' ')
-        TAMANHO_DEPOIS_HUMANO=$(lsblk -dno SIZE "/dev/$DISCO" | head -n1)
+        TAMANHO_ATUAL_DISCO=$(lsblk -bdno SIZE "/dev/$DISCO" | head -n1 | tr -d ' ')
+        TAMANHO_ATUAL_HUMANO=$(lsblk -dno SIZE "/dev/$DISCO" | head -n1)
         
         ESPACO_OCI=$(get_unallocated_space "$DISCO")
 
-        if [ "$TAMANHO_DEPOIS_RESCAN" -gt "$TAMANHO_INICIAL_DISCO" ] || (( $(echo "$ESPACO_OCI > 0" | bc -l) )); then
-            GANHO_BYTES=$((TAMANHO_DEPOIS_RESCAN - TAMANHO_INICIAL_DISCO))
+        # Lógica de Sucesso: O disco cresceu OU há espaço não alocado real
+        if [ "$TAMANHO_ATUAL_DISCO" -gt "$TAMANHO_INICIAL_DISCO" ] || (( $(echo "$ESPACO_OCI > 0" | bc -l) )); then
+            GANHO_BYTES=$((TAMANHO_ATUAL_DISCO - TAMANHO_INICIAL_DISCO))
             GANHO_GB=$(echo "scale=2; $GANHO_BYTES / 1024 / 1024 / 1024" | bc)
             
             echo -e "\n${GREEN}${BOLD}SUCESSO! Espaço novo detectado.${RESET}"
-            echo "Tamanho Atual: $TAMANHO_DEPOIS_HUMANO (+$GANHO_GB GB detectados)"
+            echo "Tamanho Atual: $TAMANHO_ATUAL_HUMANO (+$GANHO_GB GB detectados)"
             echo "Espaço não alocado (OCI): ${ESPACO_OCI} GB"
             pause_nav && break || continue 2
         else
-            echo -e "\n${RED}AVISO: Nenhum espaço novo detectado ($TAMANHO_DEPOIS_HUMANO).${RESET}"
+            echo -e "\n${RED}AVISO: Nenhum espaço novo detectado ($TAMANHO_ATUAL_HUMANO).${RESET}"
             echo "--------------------------------------------------"
             echo "1) Tentar Rescan novamente"
             echo "2) Seguir mesmo assim (Forçar)"
