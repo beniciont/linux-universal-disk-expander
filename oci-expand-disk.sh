@@ -3,12 +3,12 @@
 # ==============================================================================
 # EXPANSAO OCI LINUX
 # Criado por: Benicio Neto
-# Versão: 2.5.3 (PRODUÇÃO)
+# Versão: 2.5.4 (PRODUÇÃO)
 # Última Atualização: 03/01/2026
 #
 # HISTÓRICO DE VERSÕES:
-# 1.0.0 a 2.5.2 - Evolução e correções de bugs.
-# 2.5.3 (03/01/2026) - Correção Crítica: Ordem de captura do tamanho inicial.
+# 1.0.0 a 2.5.3 - Evolução e correções de bugs.
+# 2.5.4 (03/01/2026) - Prioridade: Mensagem de "Inalterado" agora tem precedência.
 # ==============================================================================
 
 # Configurações de Log
@@ -101,9 +101,9 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " EXPANSAO OCI LINUX v2.5.3 "
+    echo " EXPANSAO OCI LINUX v2.5.4 "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.5.3 (PRODUÇÃO)"
+    echo " Versão: 2.5.4 (PRODUÇÃO)"
     echo " Última Atualização: 03/01/2026 "
     echo "=================================="
     echo
@@ -328,14 +328,12 @@ while true; do
         fi
     fi
     
-    # --- CAPTURA CRÍTICA DO TAMANHO INICIAL (ANTES DE QUALQUER COMANDO) ---
+    # --- CAPTURA DO TAMANHO INICIAL ---
     if [[ -n "$MOUNT" && "$MOUNT" != "livre" ]]; then
         FS_SIZE_BEFORE=$(df -B1 "$MOUNT" | tail -n1 | awk '{print $2}')
     else
         FS_SIZE_BEFORE=$(lsblk -bdno SIZE "$ALVO_NOME" | head -n1)
     fi
-    log_message "DEBUG" "Tamanho Inicial Travado: $FS_SIZE_BEFORE bytes"
-    # ----------------------------------------------------------------------
 
     pause_nav || continue
 
@@ -415,17 +413,18 @@ while true; do
         else
             FS_SIZE_AFTER=$(lsblk -bdno SIZE "$ALVO_NOME" | head -n1)
         fi
-        log_message "DEBUG" "Tamanho Final: $FS_SIZE_AFTER bytes"
 
-        # Comparação definitiva
+        # LÓGICA DE PRECEDÊNCIA DE MENSAGEM (v2.5.4)
         if [[ "$FS_SIZE_AFTER" -gt "$FS_SIZE_BEFORE" ]]; then
             FINAL_MSG="${GREEN}${BOLD}SUCESSO! Expansão concluída.${RESET}"
             log_message "SUCCESS" "Expansão realizada: $FS_SIZE_BEFORE -> $FS_SIZE_AFTER bytes."
         else
+            # Se o tamanho não mudou, ignoramos qualquer aviso técnico e mostramos "INALTERADO"
             FINAL_MSG="${YELLOW}${BOLD}INALTERADO: O tamanho final não mudou. Verifique se há espaço real no disco físico (OCI Console).${RESET}"
-            log_message "WARN" "Expansão concluída mas tamanho permaneceu inalterado ($FS_SIZE_AFTER bytes)."
+            log_message "WARN" "Expansão concluída mas tamanho permaneceu inalterado."
         fi
     else
+        # Se houve erro real (comando falhou), mostramos o erro
         FINAL_MSG="${RED}${BOLD}$ERROR_DETAIL${RESET}"
         log_message "ERROR" "Falha na expansão: $ERROR_DETAIL"
     fi
