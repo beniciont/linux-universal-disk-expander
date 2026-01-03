@@ -3,12 +3,12 @@
 # ==============================================================================
 # EXPANSAO OCI LINUX - FERRAMENTA UNIVERSAL
 # Criado por: Benicio Neto
-# Versão: 2.7.1 (PRODUÇÃO)
+# Versão: 2.7.2 (PRODUÇÃO)
 # Última Atualização: 03/01/2026
 #
 # HISTÓRICO DE VERSÕES:
-# 1.0.0 a 2.7.0 - Evolução e suporte universal.
-# 2.7.1 (03/01/2026) - FIX: Cálculo real de espaço livre em discos Raw e correção de falsos positivos.
+# 1.0.0 a 2.7.1 - Evolução e correções de bugs.
+# 2.7.2 (03/01/2026) - FIX: Captura robusta de tamanho de PV LVM e FS em discos Raw.
 # ==============================================================================
 
 # Configurações de Log
@@ -59,41 +59,40 @@ check_dependencies() {
 get_unallocated_space() {
     local disk="/dev/$1"
     
-    # Tenta corrigir a tabela de partições se houver espaço no final (GPT)
     if command -v sgdisk &>/dev/null; then
         sudo sgdisk -e "$disk" >/dev/null 2>&1
     fi
 
     local disk_size_bytes=$(lsblk -bdno SIZE "$disk" | head -n1 | tr -d ' ')
+    local free_bytes=0
     
     # 1. Tenta encontrar o fim da última partição
     local last_part_end=$(sudo parted -s "$disk" unit B print | grep -E "^ [0-9]+" | tail -n1 | awk '{print $3}' | tr -d 'B')
     
     if [[ -n "$last_part_end" ]]; then
-        local free_bytes=$((disk_size_bytes - last_part_end))
+        free_bytes=$((disk_size_bytes - last_part_end))
     else
         # 2. Se não houver partição, verifica se é um PV LVM direto no disco
-        local pv_size=$(sudo pvs --noheadings --units b -o pv_size "$disk" 2>/dev/null | grep -oE "[0-9]+" | head -n1)
+        # Usamos o pvs com formato específico para evitar erros de unidade
+        local pv_size=$(sudo pvs --noheadings --units b --options pv_size "$disk" 2>/dev/null | grep -oE "[0-9]+" | head -n1)
         if [[ -n "$pv_size" ]]; then
-            local free_bytes=$((disk_size_bytes - pv_size))
+            free_bytes=$((disk_size_bytes - pv_size))
         else
             # 3. Se não for LVM, verifica se há um Sistema de Arquivos direto no disco
-            # O lsblk -b mostra o tamanho do FS se estiver montado
-            local fs_size=$(lsblk -bdno SIZE "$disk" | head -n1 | tr -d ' ')
-            # Em discos raw sem partição, o lsblk reporta o tamanho do disco. 
-            # Para ser preciso, usamos o dumpe2fs ou xfs_db, mas para o script, 
-            # se não há partição nem PV, assumimos que o disco está "limpo" ou o FS ocupa tudo.
-            # Vamos considerar 0 se houver um FS detectado para evitar falsos positivos.
             local has_fs=$(lsblk -no FSTYPE "$disk" | head -n1)
             if [[ -n "$has_fs" ]]; then
-                local free_bytes=0
+                # Se tem FS mas não tem partição, o FS ocupa o disco todo (ou o que o kernel vê)
+                free_bytes=0
             else
-                local free_bytes=$disk_size_bytes
+                # Disco realmente vazio
+                free_bytes=$disk_size_bytes
             fi
         fi
     fi
 
-    # Retorna o valor em GB (mínimo 1MB para considerar como espaço)
+    # Log de depuração interna
+    log_message "DEBUG" "Cálculo Espaço Livre ($disk): Total=$disk_size_bytes, Usado=${last_part_end:-$pv_size}, Livre=$free_bytes"
+
     if [[ "$free_bytes" -lt 1048576 ]]; then
         echo "0"
     else
@@ -104,9 +103,9 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " EXPANSAO OCI LINUX v2.7.1 "
+    echo " EXPANSAO OCI LINUX v2.7.2 "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.7.1 (UNIVERSAL)"
+    echo " Versão: 2.7.2 (UNIVERSAL)"
     echo " Última Atualização: 03/01/2026 "
     echo "=================================="
     echo
@@ -129,14 +128,14 @@ progress() {
     log_message "EXEC" "$msg"
     for ((i=1; i<=steps; i++)); do
         printf "    [%3d%%] " $((i*100/steps))
-        sleep 0.2
+        sleep 0.1
         printf "\r               \r"
     done
     echo "  ${GREEN}[OK]${RESET} $msg"
 }
 
 # Início do Script
-log_message "START" "Script Universal v2.7.1 iniciado."
+log_message "START" "Script Universal v2.7.2 iniciado."
 check_dependencies
 
 while true; do
@@ -154,7 +153,6 @@ while true; do
         echo "${RED}ERRO: Disco /dev/$DISCO não encontrado!${RESET}"; sleep 2; continue
     fi
 
-    # Captura o tamanho exato ANTES de qualquer rescan
     TAMANHO_INICIAL_DISCO=$(lsblk -bdno SIZE "/dev/$DISCO" | head -n1 | tr -d ' ')
     TAMANHO_INICIAL_HUMANO=$(lsblk -dno SIZE "/dev/$DISCO" | head -n1)
     
@@ -167,9 +165,6 @@ while true; do
         echo "${YELLOW}PASSO 2: Rescan do Kernel e Barramento${RESET}"
         echo "=========================="
         
-        # Tamanho antes do rescan deste ciclo
-        TAMANHO_ANTES_RESCAN=$(lsblk -bdno SIZE "/dev/$DISCO" | head -n1 | tr -d ' ')
-
         progress 2 "Atualizando /sys/class/block/$DISCO..."
         [ -f "/sys/class/block/$DISCO/device/rescan" ] && echo 1 | sudo tee "/sys/class/block/$DISCO/device/rescan" >/dev/null 2>&1
         progress 2 "Rescan iSCSI OCI..."
@@ -177,13 +172,11 @@ while true; do
         progress 2 "Sincronizando partições..."
         sudo partprobe "/dev/$DISCO" >/dev/null 2>&1
         
-        # Tamanho após o rescan
         TAMANHO_DEPOIS_RESCAN=$(lsblk -bdno SIZE "/dev/$DISCO" | head -n1 | tr -d ' ')
         TAMANHO_DEPOIS_HUMANO=$(lsblk -dno SIZE "/dev/$DISCO" | head -n1)
         
         ESPACO_OCI=$(get_unallocated_space "$DISCO")
 
-        # Só é SUCESSO se o tamanho do disco aumentou OU se há espaço não alocado real
         if [ "$TAMANHO_DEPOIS_RESCAN" -gt "$TAMANHO_INICIAL_DISCO" ] || (( $(echo "$ESPACO_OCI > 0" | bc -l) )); then
             GANHO_BYTES=$((TAMANHO_DEPOIS_RESCAN - TAMANHO_INICIAL_DISCO))
             GANHO_GB=$(echo "scale=2; $GANHO_BYTES / 1024 / 1024 / 1024" | bc)
@@ -238,7 +231,6 @@ while true; do
         TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | head -n1)
     fi
 
-    # Captura tamanho inicial do FS para comparação final
     if [[ -n "$MOUNT" ]]; then
         FS_SIZE_BEFORE=$(df -B1 "$MOUNT" | tail -n1 | awk '{print $2}')
     else
@@ -277,7 +269,6 @@ while true; do
         esac
     fi
 
-    # Verificação Final
     if [[ -n "$MOUNT" ]]; then
         FS_SIZE_AFTER=$(df -B1 "$MOUNT" | tail -n1 | awk '{print $2}')
     else
