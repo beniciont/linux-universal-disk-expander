@@ -415,7 +415,13 @@ while true; do
             if [[ -n "$DELTA_BYTES" && "$DELTA_BYTES" -le $MIN_DELTA_BYTES ]]; then
                 echo -e "\n${YELLOW}${BOLD}INALTERADO: O LV já utiliza virtualmente todo o disco (delta ${DELTA_BYTES} bytes). Nada a fazer.${RESET}\n"
                 log_message "INFO" "Delta entre disco e LV menor que limite (${DELTA_BYTES} bytes). Nenhuma ação necessária."
-                sleep 2; continue
+                echo -n -e "\n${YELLOW}[v=voltar / q=sair]: ${RESET}"
+                read RESP
+                case ${RESP,,} in
+                    'q') log_message "INFO" "Usuário solicitou saída (q)."; exit 0 ;;
+                    'v') log_message "INFO" "Usuário solicitou voltar (v)."; continue ;;
+                    *) continue ;;
+                esac
             fi
 
             if [[ "$LVM_PV_PRESENT" -eq 1 ]]; then
