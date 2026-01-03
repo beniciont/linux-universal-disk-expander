@@ -3,12 +3,12 @@
 # ==============================================================================
 # EXPANSAO OCI LINUX - FERRAMENTA UNIVERSAL
 # Criado por: Benicio Neto
-# Versão: 2.7.8 (PRODUÇÃO)
+# Versão: 2.8.0 (PRODUÇÃO)
 # Última Atualização: 03/01/2026
 #
 # HISTÓRICO DE VERSÕES:
-# 1.0.0 a 2.7.7 - Evolução e correções de bugs.
-# 2.7.8 (03/01/2026) - FIX: Detecção infalível por setores brutos (/sys/block).
+# 1.0.0 a 2.7.8 - Evolução e correções de bugs.
+# 2.8.0 (03/01/2026) - NEW: Opção de expansão total ou parcial (GB/MB).
 # ==============================================================================
 
 # Configurações de Log
@@ -60,38 +60,27 @@ get_unallocated_space() {
     local disk_name=$1
     local disk="/dev/$disk_name"
     
-    # Tenta corrigir a tabela de partições GPT se houver espaço no final
     if command -v sgdisk &>/dev/null; then
         sudo sgdisk -e "$disk" >/dev/null 2>&1
     fi
 
-    # 1. Tamanho Total do Disco em Bytes (via /sys/block para ser infalível)
     local disk_size_bytes=$(cat "/sys/block/$disk_name/size" 2>/dev/null)
-    disk_size_bytes=$((disk_size_bytes * 512)) # Converte setores para bytes
+    disk_size_bytes=$((disk_size_bytes * 512))
     
     local used_bytes=0
-    
-    # 2. Verifica se há partições
     local has_parts=$(lsblk -ln -o TYPE "$disk" | grep -q "part" && echo "yes" || echo "no")
     
     if [[ "$has_parts" == "yes" ]]; then
-        # Se tem partição, o espaço usado é o fim da última partição física
         used_bytes=$(sudo parted -s "$disk" unit B print | grep -E "^ [0-9]+" | tail -n1 | awk '{print $3}' | tr -d 'B')
     else
-        # 3. Se não tem partição, verifica se há LVM ou FS direto
-        # Usamos o lsblk para ver se existe algum dispositivo montado ou vinculado
-        # O tail -n +2 pula a linha do disco pai
         local children_max_end=$(lsblk -ln -b -o SIZE "$disk" | tail -n +2 | sort -rn | head -n1)
-        
         if [[ -n "$children_max_end" && "$children_max_end" -gt 0 ]]; then
             used_bytes=$children_max_end
         else
-            # 4. Se o lsblk falhar, tenta o PVS como última instância
             local pv_size=$(sudo pvs --noheadings --units b --options pv_size "$disk" 2>/dev/null | grep -oE "[0-9]+" | head -n1)
             if [[ -n "$pv_size" ]]; then
                 used_bytes=$pv_size
             else
-                # 5. Se ainda assim não achar nada, verifica se tem FS direto
                 if lsblk -no FSTYPE "$disk" | grep -q "."; then
                     used_bytes=$disk_size_bytes
                 else
@@ -102,11 +91,8 @@ get_unallocated_space() {
     fi
 
     local free_bytes=$((disk_size_bytes - used_bytes))
-    
-    # Log de depuração interna
     log_message "DEBUG" "get_unallocated_space($disk): Total=$disk_size_bytes, Usado=$used_bytes, Livre=$free_bytes"
 
-    # Consideramos 0 se o espaço livre for menor que 100MB
     if [[ "$free_bytes" -lt 104857600 ]]; then
         echo "0"
     else
@@ -117,9 +103,9 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " EXPANSAO OCI LINUX v2.7.8 "
+    echo " EXPANSAO OCI LINUX v2.8.0 "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.7.8 (PRODUÇÃO)"
+    echo " Versão: 2.8.0 (PRODUÇÃO)"
     echo " Última Atualização: 03/01/2026 "
     echo "=================================="
     echo
@@ -149,7 +135,7 @@ progress() {
 }
 
 # Início do Script
-log_message "START" "Script Universal v2.7.8 iniciado."
+log_message "START" "Script Universal v2.8.0 iniciado."
 check_dependencies
 
 while true; do
@@ -193,7 +179,6 @@ while true; do
         
         ESPACO_OCI=$(get_unallocated_space "$DISCO")
 
-        # Lógica de Sucesso: Só é sucesso se houver espaço não alocado real (> 0)
         if (( $(echo "$ESPACO_OCI > 0" | bc -l) )); then
             echo -e "\n${GREEN}${BOLD}SUCESSO! Espaço novo detectado.${RESET}"
             echo "Tamanho Atual: $TAMANHO_ATUAL_HUMANO"
@@ -273,7 +258,23 @@ while true; do
         FS_SIZE_BEFORE=$(lsblk -bdno SIZE "$FINAL_TARGET" | head -n1)
     fi
 
-    echo -e "\n${BLUE}Deseja expandir $FINAL_TARGET usando todo o espaço disponível? (s/n)${RESET}"
+    # ESCOLHA DO TAMANHO DA EXPANSAO
+    echo -e "\n${YELLOW}OPÇÕES DE EXPANSÃO:${RESET}"
+    echo "1) Usar todo o espaço disponível (100%)"
+    echo "2) Definir um valor específico (ex: 10G, 500M)"
+    echo -n "Escolha uma opção: "
+    read OPT_SIZE
+    
+    EXP_VALUE=""
+    if [[ "$OPT_SIZE" == "2" ]]; then
+        echo -n "Digite o valor desejado (ex: 10G, 500M): "
+        read EXP_VALUE
+        if [[ ! "$EXP_VALUE" =~ ^[0-9]+[GgMm]$ ]]; then
+            echo "${RED}ERRO: Formato inválido! Use algo como 10G ou 500M.${RESET}"; sleep 2; continue
+        fi
+    fi
+
+    echo -e "\n${BLUE}Confirmar expansão de $FINAL_TARGET? (s/n)${RESET}"
     read CONFIRM
     [[ ${CONFIRM,,} != 's' ]] && continue
 
@@ -284,7 +285,12 @@ while true; do
     
     if [[ "$MODO" == "PART" ]]; then
         progress 2 "Expandindo partição $PART_NUM..."
-        sudo growpart "/dev/$DISCO" "$PART_NUM" >/dev/null 2>&1 || sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" 100% >/dev/null 2>&1
+        if [[ -z "$EXP_VALUE" ]]; then
+            sudo growpart "/dev/$DISCO" "$PART_NUM" >/dev/null 2>&1 || sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" 100% >/dev/null 2>&1
+        else
+            # Para valor específico em partição, usamos parted
+            sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" "$EXP_VALUE" >/dev/null 2>&1
+        fi
         sudo partprobe "/dev/$DISCO" >/dev/null 2>&1
     fi
 
@@ -295,8 +301,13 @@ while true; do
         sudo pvresize "$PV_TARGET" >/dev/null 2>&1
         
         if [[ -n "$ALVO_LVM" ]]; then
-            progress 2 "Expandindo Logical Volume (LV) $ALVO_LVM..."
-            sudo lvextend -l +100%FREE "$ALVO_LVM" >/dev/null 2>&1
+            if [[ -z "$EXP_VALUE" ]]; then
+                progress 2 "Expandindo Logical Volume (LV) ao máximo..."
+                sudo lvextend -l +100%FREE "$ALVO_LVM" >/dev/null 2>&1
+            else
+                progress 2 "Expandindo Logical Volume (LV) em $EXP_VALUE..."
+                sudo lvextend -L +"$EXP_VALUE" "$ALVO_LVM" >/dev/null 2>&1
+            fi
         fi
     fi
 
