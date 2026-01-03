@@ -70,6 +70,8 @@ Observações de segurança: o modo `--force` remove prompts interativos, use ap
   - Comando de resize retornou `NOCHANGE`.
 - `ERRO: ...` — erros técnicos traduzidos pelo script (falta de ferramentas, tamanho fora do dispositivo, etc.).
 
+- **Comportamento de retorno:** Quando o script detectar `INALTERADO` devido ao LV já utilizar virtualmente todo o disco (caso `dm_over_disk` com delta pequeno), ele exibirá o prompt `[v=voltar / q=sair]` e aguardará a escolha do usuário antes de voltar ao menu inicial.
+
 ### Comportamento automático de detecção
 
 O script agora detecta automaticamente o layout do disco e escolhe o fluxo mais seguro:
