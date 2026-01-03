@@ -3,12 +3,12 @@
 # ==============================================================================
 # EXPANSAO OCI LINUX - FERRAMENTA UNIVERSAL
 # Criado por: Benicio Neto
-# Versão: 2.7.3 (PRODUÇÃO)
+# Versão: 2.7.4 (PRODUÇÃO)
 # Última Atualização: 03/01/2026
 #
 # HISTÓRICO DE VERSÕES:
-# 1.0.0 a 2.7.2 - Evolução e correções de bugs.
-# 2.7.3 (03/01/2026) - FIX: Nova lógica infalível de detecção de espaço livre (OCI).
+# 1.0.0 a 2.7.3 - Evolução e correções de bugs.
+# 2.7.4 (03/01/2026) - FIX: Unificação da lógica de detecção de espaço (Lógica do sda para todos).
 # ==============================================================================
 
 # Configurações de Log
@@ -67,14 +67,13 @@ get_unallocated_space() {
     local disk_size_bytes=$(lsblk -bdno SIZE "$disk" | head -n1 | tr -d ' ')
     local used_bytes=0
     
-    # 1. Verifica se há partições
+    # 1. Verifica se há partições (Lógica que funcionou no sda)
     local has_parts=$(lsblk -ln -o TYPE "$disk" | grep -q "part" && echo "yes" || echo "no")
     
     if [[ "$has_parts" == "yes" ]]; then
-        # Se tem partição, o espaço usado é o fim da última partição
         used_bytes=$(sudo parted -s "$disk" unit B print | grep -E "^ [0-9]+" | tail -n1 | awk '{print $3}' | tr -d 'B')
     else
-        # 2. Se não tem partição, verifica se é um PV LVM
+        # 2. Se não tem partição, verifica se é um PV LVM (Tratando como se fosse uma partição)
         local pv_size=$(sudo pvs --noheadings --units b --options pv_size "$disk" 2>/dev/null | grep -oE "[0-9]+" | head -n1)
         if [[ -n "$pv_size" ]]; then
             used_bytes=$pv_size
@@ -82,10 +81,8 @@ get_unallocated_space() {
             # 3. Se não é LVM, verifica se tem um Sistema de Arquivos direto
             local has_fs=$(lsblk -no FSTYPE "$disk" | head -n1)
             if [[ -n "$has_fs" ]]; then
-                # Se tem FS direto, assumimos que ele ocupa o que o kernel vê no momento
                 used_bytes=$disk_size_bytes
             else
-                # Disco vazio
                 used_bytes=0
             fi
         fi
@@ -96,7 +93,8 @@ get_unallocated_space() {
     # Log de depuração
     log_message "DEBUG" "get_unallocated_space($disk): Total=$disk_size_bytes, Usado=$used_bytes, Livre=$free_bytes"
 
-    if [[ "$free_bytes" -lt 1048576 ]]; then
+    # Consideramos 0 se o espaço livre for menor que 10MB (margem de segurança para metadados)
+    if [[ "$free_bytes" -lt 10485760 ]]; then
         echo "0"
     else
         echo "scale=2; $free_bytes / 1024 / 1024 / 1024" | bc
@@ -106,9 +104,9 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " EXPANSAO OCI LINUX v2.7.3 "
+    echo " EXPANSAO OCI LINUX v2.7.4 "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.7.3 (PRODUÇÃO)"
+    echo " Versão: 2.7.4 (PRODUÇÃO)"
     echo " Última Atualização: 03/01/2026 "
     echo "=================================="
     echo
@@ -138,7 +136,7 @@ progress() {
 }
 
 # Início do Script
-log_message "START" "Script Universal v2.7.3 iniciado."
+log_message "START" "Script Universal v2.7.4 iniciado."
 check_dependencies
 
 while true; do
@@ -156,9 +154,8 @@ while true; do
         echo "${RED}ERRO: Disco /dev/$DISCO não encontrado!${RESET}"; sleep 2; continue
     fi
 
-    # Captura o tamanho inicial absoluto para evitar falsos positivos
     TAMANHO_INICIAL_DISCO=$(lsblk -bdno SIZE "/dev/$DISCO" | head -n1 | tr -d ' ')
-    TAMANHO_INICIAL_HUMANO=$(lsblk -dno SIZE "/dev/$DISCO" | head -n1)
+    TAMANHO_INICIAL_HUMANO=$(lsblk -dno SIZE "/dev/$DISCO" | head -n1 | xargs)
     
     echo -e "\n${GREEN}DISCO SELECIONADO: /dev/$DISCO ($TAMANHO_INICIAL_HUMANO)${RESET}"
     pause_nav || continue
@@ -177,7 +174,7 @@ while true; do
         sudo partprobe "/dev/$DISCO" >/dev/null 2>&1
         
         TAMANHO_ATUAL_DISCO=$(lsblk -bdno SIZE "/dev/$DISCO" | head -n1 | tr -d ' ')
-        TAMANHO_ATUAL_HUMANO=$(lsblk -dno SIZE "/dev/$DISCO" | head -n1)
+        TAMANHO_ATUAL_HUMANO=$(lsblk -dno SIZE "/dev/$DISCO" | head -n1 | xargs)
         
         ESPACO_OCI=$(get_unallocated_space "$DISCO")
 
