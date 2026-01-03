@@ -1,4 +1,4 @@
-# OCI Linux Disk Expander 🚀 (Branch: develop)
+# Linux Universal Disk Expander 🚀 (Branch: develop)
 
 > [!WARNING]
 > **ESTA É UMA VERSÃO DE DESENVOLVIMENTO (BETA).**
@@ -7,7 +7,7 @@
 [![Release](https://img.shields.io/github/v/release/beniciont/oci-linux-disk-expander?color=orange&label=Beta)](https://github.com/beniciont/oci-linux-disk-expander/tree/develop)
 [![License](https://img.shields.io/github/license/beniciont/oci-linux-disk-expander?color=blue)](LICENSE)
 
-Ferramenta universal para expansão de discos e partições em instâncias Linux. Esta branch contém a versão **v2.9.0-beta**, focada em compatibilidade **Multi-Cloud** e **Virtualização**.
+Ferramenta universal e agnóstica para expansão de discos e partições em qualquer ambiente Linux (Cloud ou On-premise). Esta branch contém a versão **v2.9.0-beta**, focada em compatibilidade **Multi-Cloud** e **Virtualização**.
 
 ---
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# LINUX DISK EXPANDER - FERRAMENTA UNIVERSAL (MULTI-CLOUD & VIRTUAL)
+# LINUX UNIVERSAL DISK EXPANDER - MULTI-CLOUD & VIRTUAL
 # Criado por: Benicio Neto
 # Versão: 2.9.0-beta (DESENVOLVIMENTO)
 # Última Atualização: 03/01/2026
@@ -103,7 +103,7 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " LINUX DISK EXPANDER v2.9.0-beta "
+    echo " LINUX UNIVERSAL DISK EXPANDER v2.9.0-beta "
     echo " Criado por: Benicio Neto"
     echo " Versão: 2.9.0-beta (TESTE)"
     echo " Ambiente: Multi-Cloud / Virtual"
