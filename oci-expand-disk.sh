@@ -3,12 +3,12 @@
 # ==============================================================================
 # EXPANSAO OCI LINUX
 # Criado por: Benicio Neto
-# Versão: 2.5.8 (PRODUÇÃO)
+# Versão: 2.5.9 (PRODUÇÃO)
 # Última Atualização: 03/01/2026
 #
 # HISTÓRICO DE VERSÕES:
-# 1.0.0 a 2.5.7 - Evolução e correções de bugs.
-# 2.5.8 (03/01/2026) - FIX: Garantia de status "Inalterado" em todos os cenários.
+# 1.0.0 a 2.5.8 - Evolução e correções de bugs.
+# 2.5.9 (03/01/2026) - FIX: Cálculo preciso de espaço não alocado (OCI).
 # ==============================================================================
 
 # Configurações de Log
@@ -79,17 +79,26 @@ get_unallocated_space() {
     
     check_dependencies
 
+    # Tenta corrigir a tabela de partições se houver espaço no final (GPT)
     if command -v sgdisk &>/dev/null; then
         sudo sgdisk -e "$disk" >/dev/null 2>&1
     fi
 
-    local disk_size_bytes=$(lsblk -bdno SIZE "$disk" | head -n1)
+    # Tamanho total do disco em bytes
+    local disk_size_bytes=$(lsblk -bdno SIZE "$disk" | head -n1 | tr -d ' ')
+    
+    # Encontra o final da última partição em bytes
+    # Usamos o parted para pegar o valor exato do 'End' da última partição
     local last_part_end=$(sudo parted -s "$disk" unit B print | grep -E "^ [0-9]+" | tail -n1 | awk '{print $3}' | tr -d 'B')
     
     if [[ -z "$last_part_end" ]]; then
+        # Se não houver partições, o espaço livre é o tamanho total do disco
         echo "scale=2; $disk_size_bytes / 1024 / 1024 / 1024" | bc
     else
+        # Espaço livre = Tamanho Total - Fim da Última Partição
         local free_bytes=$((disk_size_bytes - last_part_end))
+        
+        # Se o espaço livre for menor que 1MB, consideramos como 0
         if [[ "$free_bytes" -lt 1048576 ]]; then
             echo "0"
         else
@@ -101,9 +110,9 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " EXPANSAO OCI LINUX v2.5.8 "
+    echo " EXPANSAO OCI LINUX v2.5.9 "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.5.8 (PRODUÇÃO)"
+    echo " Versão: 2.5.9 (PRODUÇÃO)"
     echo " Última Atualização: 03/01/2026 "
     echo "=================================="
     echo
@@ -409,19 +418,18 @@ while true; do
         fi
     fi
 
-    # Verificação Final de Tamanho (Independente de EXP_SUCCESS)
+    # Verificação Final de Tamanho
     if [[ -n "$MOUNT" && "$MOUNT" != "livre" ]]; then
         FS_SIZE_AFTER=$(df -B1 "$MOUNT" | tail -n1 | awk '{print $2}')
     else
         FS_SIZE_AFTER=$(lsblk -bdno SIZE "$ALVO_NOME" | head -n1)
     fi
 
-    # LÓGICA DE RESULTADO FINAL (v2.5.8)
+    # LÓGICA DE RESULTADO FINAL
     if [[ "$FS_SIZE_AFTER" -gt "$FS_SIZE_BEFORE" ]]; then
         FINAL_MSG="${GREEN}${BOLD}SUCESSO! Expansão concluída.${RESET}"
         log_message "SUCCESS" "Expansão realizada: $FS_SIZE_BEFORE -> $FS_SIZE_AFTER bytes."
     else
-        # SE NÃO MUDOU, É SEMPRE INALTERADO
         FINAL_MSG="${YELLOW}${BOLD}INALTERADO: O tamanho final não mudou. Verifique se há espaço real no disco físico (OCI Console).${RESET}"
         log_message "WARN" "Expansão concluída mas tamanho permaneceu inalterado."
     fi
