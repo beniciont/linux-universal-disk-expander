@@ -3,12 +3,12 @@
 # ==============================================================================
 # EXPANSAO OCI LINUX
 # Criado por: Benicio Neto
-# Versão: 2.5.4 (PRODUÇÃO)
+# Versão: 2.5.5 (PRODUÇÃO)
 # Última Atualização: 03/01/2026
 #
 # HISTÓRICO DE VERSÕES:
-# 1.0.0 a 2.5.3 - Evolução e correções de bugs.
-# 2.5.4 (03/01/2026) - Prioridade: Mensagem de "Inalterado" agora tem precedência.
+# 1.0.0 a 2.5.4 - Evolução e correções de bugs.
+# 2.5.5 (03/01/2026) - Correção Radical: Silenciamento de avisos técnicos no resultado.
 # ==============================================================================
 
 # Configurações de Log
@@ -67,7 +67,8 @@ friendly_error() {
     elif echo "$raw_msg" | grep -qi "outside of device"; then
         echo "ERRO: O tamanho solicitado é maior do que o disco físico permite."
     elif echo "$raw_msg" | grep -qi "being used"; then
-        echo "AVISO: A partição está em uso, mas a expansão online foi solicitada."
+        # Retornamos vazio para avisos de "em uso", pois a verificação de bytes cuidará disso
+        echo ""
     else
         echo "ERRO TÉCNICO: $raw_msg"
     fi
@@ -101,9 +102,9 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " EXPANSAO OCI LINUX v2.5.4 "
+    echo " EXPANSAO OCI LINUX v2.5.5 "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.5.4 (PRODUÇÃO)"
+    echo " Versão: 2.5.5 (PRODUÇÃO)"
     echo " Última Atualização: 03/01/2026 "
     echo "=================================="
     echo
@@ -414,17 +415,18 @@ while true; do
             FS_SIZE_AFTER=$(lsblk -bdno SIZE "$ALVO_NOME" | head -n1)
         fi
 
-        # LÓGICA DE PRECEDÊNCIA DE MENSAGEM (v2.5.4)
+        # LÓGICA DE RESULTADO FINAL (v2.5.5)
         if [[ "$FS_SIZE_AFTER" -gt "$FS_SIZE_BEFORE" ]]; then
             FINAL_MSG="${GREEN}${BOLD}SUCESSO! Expansão concluída.${RESET}"
             log_message "SUCCESS" "Expansão realizada: $FS_SIZE_BEFORE -> $FS_SIZE_AFTER bytes."
         else
-            # Se o tamanho não mudou, ignoramos qualquer aviso técnico e mostramos "INALTERADO"
+            # SE NÃO MUDOU, IGNORA TUDO E MOSTRA INALTERADO
             FINAL_MSG="${YELLOW}${BOLD}INALTERADO: O tamanho final não mudou. Verifique se há espaço real no disco físico (OCI Console).${RESET}"
             log_message "WARN" "Expansão concluída mas tamanho permaneceu inalterado."
+            ERROR_DETAIL="" # Limpa qualquer aviso técnico acumulado
         fi
     else
-        # Se houve erro real (comando falhou), mostramos o erro
+        # Se houve erro real (comando falhou), mostramos o erro traduzido
         FINAL_MSG="${RED}${BOLD}$ERROR_DETAIL${RESET}"
         log_message "ERROR" "Falha na expansão: $ERROR_DETAIL"
     fi
@@ -438,6 +440,12 @@ while true; do
         echo -e "\n${CYAN}Tamanho atual de $MOUNT:${RESET}"
         df -h "$MOUNT" | grep -E "Filesystem|$ALVO_NOME"
     fi
+    
+    # SÓ EXIBE ERROR_DETAIL SE NÃO FOR SUCESSO E SE NÃO ESTIVER VAZIO
+    if [[ -n "$ERROR_DETAIL" && "$FINAL_MSG" != *"${GREEN}"* && "$FINAL_MSG" != *"${YELLOW}"* ]]; then
+        echo -e "\n$ERROR_DETAIL"
+    fi
+    
     echo -e "\n$FINAL_MSG"
     
     echo -e "\n${BLUE}Deseja realizar outra operação?${RESET}"
