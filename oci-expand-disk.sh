@@ -3,12 +3,12 @@
 # ==============================================================================
 # EXPANSAO OCI LINUX - FERRAMENTA UNIVERSAL
 # Criado por: Benicio Neto
-# Versão: 2.7.7 (PRODUÇÃO)
+# Versão: 2.7.8 (PRODUÇÃO)
 # Última Atualização: 03/01/2026
 #
 # HISTÓRICO DE VERSÕES:
-# 1.0.0 a 2.7.6 - Evolução e correções de bugs.
-# 2.7.7 (03/01/2026) - FIX: Lógica de detecção de espaço livre via PVS e soma de filhos.
+# 1.0.0 a 2.7.7 - Evolução e correções de bugs.
+# 2.7.8 (03/01/2026) - FIX: Detecção infalível por setores brutos (/sys/block).
 # ==============================================================================
 
 # Configurações de Log
@@ -57,37 +57,42 @@ check_dependencies() {
 
 # Função para obter o espaço não alocado (Espaço OCI)
 get_unallocated_space() {
-    local disk="/dev/$1"
+    local disk_name=$1
+    local disk="/dev/$disk_name"
     
     # Tenta corrigir a tabela de partições GPT se houver espaço no final
     if command -v sgdisk &>/dev/null; then
         sudo sgdisk -e "$disk" >/dev/null 2>&1
     fi
 
-    local disk_size_bytes=$(lsblk -bdno SIZE "$disk" | head -n1 | tr -d ' ')
+    # 1. Tamanho Total do Disco em Bytes (via /sys/block para ser infalível)
+    local disk_size_bytes=$(cat "/sys/block/$disk_name/size" 2>/dev/null)
+    disk_size_bytes=$((disk_size_bytes * 512)) # Converte setores para bytes
+    
     local used_bytes=0
     
-    # 1. Verifica se há partições (Lógica do sda)
+    # 2. Verifica se há partições
     local has_parts=$(lsblk -ln -o TYPE "$disk" | grep -q "part" && echo "yes" || echo "no")
     
     if [[ "$has_parts" == "yes" ]]; then
+        # Se tem partição, o espaço usado é o fim da última partição física
         used_bytes=$(sudo parted -s "$disk" unit B print | grep -E "^ [0-9]+" | tail -n1 | awk '{print $3}' | tr -d 'B')
     else
-        # 2. Se não tem partição, verifica se é um PV LVM (Consulta Direta)
-        local pv_size=$(sudo pvs --noheadings --units b --options pv_size "$disk" 2>/dev/null | grep -oE "[0-9]+" | head -n1)
+        # 3. Se não tem partição, verifica se há LVM ou FS direto
+        # Usamos o lsblk para ver se existe algum dispositivo montado ou vinculado
+        # O tail -n +2 pula a linha do disco pai
+        local children_max_end=$(lsblk -ln -b -o SIZE "$disk" | tail -n +2 | sort -rn | head -n1)
         
-        if [[ -n "$pv_size" && "$pv_size" -gt 0 ]]; then
-            used_bytes=$pv_size
+        if [[ -n "$children_max_end" && "$children_max_end" -gt 0 ]]; then
+            used_bytes=$children_max_end
         else
-            # 3. Se o PVS falhar, tenta somar todos os filhos via lsblk
-            # Pegamos todos os tamanhos, removemos o primeiro (que é o disco pai) e somamos o resto
-            local children_sum=$(lsblk -ln -b -o SIZE "$disk" | tail -n +2 | awk '{sum+=$1} END {print sum}')
-            if [[ -n "$children_sum" && "$children_sum" -gt 0 ]]; then
-                used_bytes=$children_sum
+            # 4. Se o lsblk falhar, tenta o PVS como última instância
+            local pv_size=$(sudo pvs --noheadings --units b --options pv_size "$disk" 2>/dev/null | grep -oE "[0-9]+" | head -n1)
+            if [[ -n "$pv_size" ]]; then
+                used_bytes=$pv_size
             else
-                # 4. Se não tem filhos, verifica se tem um Sistema de Arquivos direto
-                local has_fs=$(lsblk -no FSTYPE "$disk" | head -n1)
-                if [[ -n "$has_fs" ]]; then
+                # 5. Se ainda assim não achar nada, verifica se tem FS direto
+                if lsblk -no FSTYPE "$disk" | grep -q "."; then
                     used_bytes=$disk_size_bytes
                 else
                     used_bytes=0
@@ -112,9 +117,9 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " EXPANSAO OCI LINUX v2.7.7 "
+    echo " EXPANSAO OCI LINUX v2.7.8 "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.7.7 (PRODUÇÃO)"
+    echo " Versão: 2.7.8 (PRODUÇÃO)"
     echo " Última Atualização: 03/01/2026 "
     echo "=================================="
     echo
@@ -144,7 +149,7 @@ progress() {
 }
 
 # Início do Script
-log_message "START" "Script Universal v2.7.7 iniciado."
+log_message "START" "Script Universal v2.7.8 iniciado."
 check_dependencies
 
 while true; do
@@ -162,7 +167,8 @@ while true; do
         echo "${RED}ERRO: Disco /dev/$DISCO não encontrado!${RESET}"; sleep 2; continue
     fi
 
-    TAMANHO_INICIAL_DISCO=$(lsblk -bdno SIZE "/dev/$DISCO" | head -n1 | tr -d ' ')
+    TAMANHO_INICIAL_DISCO=$(cat "/sys/block/$DISCO/size" 2>/dev/null)
+    TAMANHO_INICIAL_DISCO=$((TAMANHO_INICIAL_DISCO * 512))
     TAMANHO_INICIAL_HUMANO=$(lsblk -dno SIZE "/dev/$DISCO" | head -n1 | xargs)
     
     echo -e "\n${GREEN}DISCO SELECIONADO: /dev/$DISCO ($TAMANHO_INICIAL_HUMANO)${RESET}"
@@ -181,7 +187,8 @@ while true; do
         progress 2 "Sincronizando partições..."
         sudo partprobe "/dev/$DISCO" >/dev/null 2>&1
         
-        TAMANHO_ATUAL_DISCO=$(lsblk -bdno SIZE "/dev/$DISCO" | head -n1 | tr -d ' ')
+        TAMANHO_ATUAL_DISCO=$(cat "/sys/block/$DISCO/size" 2>/dev/null)
+        TAMANHO_ATUAL_DISCO=$((TAMANHO_ATUAL_DISCO * 512))
         TAMANHO_ATUAL_HUMANO=$(lsblk -dno SIZE "/dev/$DISCO" | head -n1 | xargs)
         
         ESPACO_OCI=$(get_unallocated_space "$DISCO")
