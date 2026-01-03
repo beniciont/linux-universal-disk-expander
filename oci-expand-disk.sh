@@ -3,12 +3,12 @@
 # ==============================================================================
 # EXPANSAO OCI LINUX - FERRAMENTA UNIVERSAL
 # Criado por: Benicio Neto
-# Versão: 2.7.6 (PRODUÇÃO)
+# Versão: 2.7.7 (PRODUÇÃO)
 # Última Atualização: 03/01/2026
 #
 # HISTÓRICO DE VERSÕES:
-# 1.0.0 a 2.7.5 - Evolução e correções de bugs.
-# 2.7.6 (03/01/2026) - FIX: Lógica de detecção de espaço livre baseada em lsblk (Raw/LVM).
+# 1.0.0 a 2.7.6 - Evolução e correções de bugs.
+# 2.7.7 (03/01/2026) - FIX: Lógica de detecção de espaço livre via PVS e soma de filhos.
 # ==============================================================================
 
 # Configurações de Log
@@ -67,26 +67,31 @@ get_unallocated_space() {
     local disk_size_bytes=$(lsblk -bdno SIZE "$disk" | head -n1 | tr -d ' ')
     local used_bytes=0
     
-    # 1. Verifica se há partições
+    # 1. Verifica se há partições (Lógica do sda)
     local has_parts=$(lsblk -ln -o TYPE "$disk" | grep -q "part" && echo "yes" || echo "no")
     
     if [[ "$has_parts" == "yes" ]]; then
-        # Se tem partição, o espaço usado é o fim da última partição física
         used_bytes=$(sudo parted -s "$disk" unit B print | grep -E "^ [0-9]+" | tail -n1 | awk '{print $3}' | tr -d 'B')
     else
-        # 2. Se não tem partição, verifica o maior "filho" (LVM ou FS direto)
-        # O lsblk -b mostra o tamanho em bytes de todos os itens vinculados ao disco
-        local max_child_size=$(lsblk -bdno SIZE "$disk" | tail -n +2 | sort -rn | head -n1 | tr -d ' ')
+        # 2. Se não tem partição, verifica se é um PV LVM (Consulta Direta)
+        local pv_size=$(sudo pvs --noheadings --units b --options pv_size "$disk" 2>/dev/null | grep -oE "[0-9]+" | head -n1)
         
-        if [[ -n "$max_child_size" ]]; then
-            used_bytes=$max_child_size
+        if [[ -n "$pv_size" && "$pv_size" -gt 0 ]]; then
+            used_bytes=$pv_size
         else
-            # 3. Se não tem filhos, verifica se o próprio disco tem um sistema de arquivos
-            local has_fs=$(lsblk -no FSTYPE "$disk" | head -n1)
-            if [[ -n "$has_fs" ]]; then
-                used_bytes=$disk_size_bytes
+            # 3. Se o PVS falhar, tenta somar todos os filhos via lsblk
+            # Pegamos todos os tamanhos, removemos o primeiro (que é o disco pai) e somamos o resto
+            local children_sum=$(lsblk -ln -b -o SIZE "$disk" | tail -n +2 | awk '{sum+=$1} END {print sum}')
+            if [[ -n "$children_sum" && "$children_sum" -gt 0 ]]; then
+                used_bytes=$children_sum
             else
-                used_bytes=0
+                # 4. Se não tem filhos, verifica se tem um Sistema de Arquivos direto
+                local has_fs=$(lsblk -no FSTYPE "$disk" | head -n1)
+                if [[ -n "$has_fs" ]]; then
+                    used_bytes=$disk_size_bytes
+                else
+                    used_bytes=0
+                fi
             fi
         fi
     fi
@@ -96,7 +101,7 @@ get_unallocated_space() {
     # Log de depuração interna
     log_message "DEBUG" "get_unallocated_space($disk): Total=$disk_size_bytes, Usado=$used_bytes, Livre=$free_bytes"
 
-    # Consideramos 0 se o espaço livre for menor que 100MB (margem para metadados e alinhamento)
+    # Consideramos 0 se o espaço livre for menor que 100MB
     if [[ "$free_bytes" -lt 104857600 ]]; then
         echo "0"
     else
@@ -107,9 +112,9 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " EXPANSAO OCI LINUX v2.7.6 "
+    echo " EXPANSAO OCI LINUX v2.7.7 "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.7.6 (PRODUÇÃO)"
+    echo " Versão: 2.7.7 (PRODUÇÃO)"
     echo " Última Atualização: 03/01/2026 "
     echo "=================================="
     echo
@@ -139,7 +144,7 @@ progress() {
 }
 
 # Início do Script
-log_message "START" "Script Universal v2.7.6 iniciado."
+log_message "START" "Script Universal v2.7.7 iniciado."
 check_dependencies
 
 while true; do
@@ -229,7 +234,6 @@ while true; do
         MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | head -n1)
         TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | head -n1)
         
-        # Verifica se a partição escolhida contém LVM
         if lsblk -no FSTYPE "$ALVO_NOME" | grep -qi "LVM"; then
             HAS_LVM="yes"
             REAL_LV=$(lsblk -ln -o NAME,TYPE "$ALVO_NOME" | grep "lvm" | head -n1 | awk '{print $1}')
@@ -244,7 +248,6 @@ while true; do
         MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | head -n1)
         TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | head -n1)
         
-        # Verifica se o disco raw contém LVM
         if lsblk -no FSTYPE "$ALVO_NOME" | grep -qi "LVM"; then
             HAS_LVM="yes"
             REAL_LV=$(lsblk -ln -o NAME,TYPE "$ALVO_NOME" | grep "lvm" | head -n1 | awk '{print $1}')
