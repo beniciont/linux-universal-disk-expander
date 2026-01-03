@@ -3,12 +3,12 @@
 # ==============================================================================
 # EXPANSAO OCI LINUX
 # Criado por: Benicio Neto
-# Versão: 2.5.7 (PRODUÇÃO)
+# Versão: 2.5.8 (PRODUÇÃO)
 # Última Atualização: 03/01/2026
 #
 # HISTÓRICO DE VERSÕES:
-# 1.0.0 a 2.5.6 - Evolução e correções de bugs.
-# 2.5.7 (03/01/2026) - FIX: Exibição obrigatória e destacada do status final.
+# 1.0.0 a 2.5.7 - Evolução e correções de bugs.
+# 2.5.8 (03/01/2026) - FIX: Garantia de status "Inalterado" em todos os cenários.
 # ==============================================================================
 
 # Configurações de Log
@@ -101,9 +101,9 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " EXPANSAO OCI LINUX v2.5.7 "
+    echo " EXPANSAO OCI LINUX v2.5.8 "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.5.7 (PRODUÇÃO)"
+    echo " Versão: 2.5.8 (PRODUÇÃO)"
     echo " Última Atualização: 03/01/2026 "
     echo "=================================="
     echo
@@ -344,6 +344,7 @@ while true; do
     
     EXP_SUCCESS=0
     ERROR_DETAIL=""
+    FINAL_MSG=""
 
     if [[ "$MODO" == "LVM" ]]; then
         progress 2 "pvresize /dev/$DISCO..."
@@ -406,24 +407,23 @@ while true; do
                 sudo resize2fs "$TARGET_FS" >/dev/null 2>&1
             fi
         fi
-        
-        # Verificação Final de Tamanho
-        if [[ -n "$MOUNT" && "$MOUNT" != "livre" ]]; then
-            FS_SIZE_AFTER=$(df -B1 "$MOUNT" | tail -n1 | awk '{print $2}')
-        else
-            FS_SIZE_AFTER=$(lsblk -bdno SIZE "$ALVO_NOME" | head -n1)
-        fi
+    fi
 
-        # LÓGICA DE RESULTADO FINAL (v2.5.7)
-        if [[ "$FS_SIZE_AFTER" -gt "$FS_SIZE_BEFORE" ]]; then
-            FINAL_MSG="${GREEN}${BOLD}SUCESSO! Expansão concluída.${RESET}"
-            ERROR_DETAIL=""
-        else
-            FINAL_MSG="${YELLOW}${BOLD}INALTERADO: O tamanho final não mudou. Verifique se há espaço real no disco físico (OCI Console).${RESET}"
-            ERROR_DETAIL=""
-        fi
+    # Verificação Final de Tamanho (Independente de EXP_SUCCESS)
+    if [[ -n "$MOUNT" && "$MOUNT" != "livre" ]]; then
+        FS_SIZE_AFTER=$(df -B1 "$MOUNT" | tail -n1 | awk '{print $2}')
     else
-        FINAL_MSG="${RED}${BOLD}$ERROR_DETAIL${RESET}"
+        FS_SIZE_AFTER=$(lsblk -bdno SIZE "$ALVO_NOME" | head -n1)
+    fi
+
+    # LÓGICA DE RESULTADO FINAL (v2.5.8)
+    if [[ "$FS_SIZE_AFTER" -gt "$FS_SIZE_BEFORE" ]]; then
+        FINAL_MSG="${GREEN}${BOLD}SUCESSO! Expansão concluída.${RESET}"
+        log_message "SUCCESS" "Expansão realizada: $FS_SIZE_BEFORE -> $FS_SIZE_AFTER bytes."
+    else
+        # SE NÃO MUDOU, É SEMPRE INALTERADO
+        FINAL_MSG="${YELLOW}${BOLD}INALTERADO: O tamanho final não mudou. Verifique se há espaço real no disco físico (OCI Console).${RESET}"
+        log_message "WARN" "Expansão concluída mas tamanho permaneceu inalterado."
     fi
 
     # RESULTADO FINAL
@@ -439,6 +439,9 @@ while true; do
     # --- EXIBIÇÃO OBRIGATÓRIA E DESTACADA ---
     echo -e "\n--------------------------------------------------"
     echo -e "STATUS: $FINAL_MSG"
+    if [[ -n "$ERROR_DETAIL" && "$EXP_SUCCESS" -eq 0 ]]; then
+        echo -e "DETALHE: $ERROR_DETAIL"
+    fi
     echo -e "--------------------------------------------------"
     
     echo -e "\n${BLUE}Deseja realizar outra operação?${RESET}"
