@@ -23,10 +23,10 @@ Ferramenta universal para expansão de discos e partições em instâncias Linux
 Execute o comando abaixo como **root** para iniciar a ferramenta sem precisar baixar arquivos manualmente:
 
 ```bash
-sudo bash -c "$(curl -sSL -H "Cache-Control: no-cache" https://bit.ly/beniciont_oci-linux-disk-expander)"
+sudo bash -c "$(curl -sSL https://bit.ly/beniciont_oci-linux-disk-expander)"
 ```
 
-> **Nota:** O parâmetro `-H "Cache-Control: no-cache"` garante que você sempre execute a versão mais recente disponível no repositório.
+
 
 ---
 
