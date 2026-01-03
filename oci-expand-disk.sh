@@ -425,11 +425,7 @@ while true; do
             FINAL_MSG="${GREEN}${BOLD}SUCESSO! Expansão concluída.${RESET}"
             ERROR_DETAIL=""
         else
-            if [[ "$FORCED_NO_SPACE" -eq 1 ]]; then
-                FINAL_MSG="${YELLOW}${BOLD}INALTERADO: Nenhuma alteração realizada — você forçou a operação mas não havia espaço livre no disco (OCI).${RESET}"
-            else
-                FINAL_MSG="${YELLOW}${BOLD}INALTERADO: O tamanho final não mudou. Verifique se há espaço real no disco físico (OCI Console).${RESET}"
-            fi
+            FINAL_MSG="${YELLOW}${BOLD}INALTERADO: O tamanho final não mudou. Verifique se há espaço real no disco físico (OCI Console).${RESET}"
             ERROR_DETAIL=""
         fi
     else
@@ -437,6 +433,15 @@ while true; do
             FINAL_MSG="${YELLOW}${BOLD}INALTERADO: Nenhuma alteração realizada. Possível falta de espaço livre no disco ou erro não identificado.${RESET}"
         else
             FINAL_MSG="${RED}${BOLD}$ERROR_DETAIL${RESET}"
+        fi
+    fi
+
+    # Garantia: se por algum motivo FINAL_MSG não foi definido, definir mensagem padrão
+    if [[ -z "${FINAL_MSG// }" ]]; then
+        if [[ "${FORCED_NO_SPACE:-0}" -eq 1 ]]; then
+            FINAL_MSG="${YELLOW}${BOLD}INALTERADO: Nenhuma alteração realizada — você forçou a operação mas não havia espaço livre no disco (OCI).${RESET}"
+        else
+            FINAL_MSG="${YELLOW}${BOLD}INALTERADO: Nenhuma alteração realizada. Possível falta de espaço livre no disco ou erro não identificado.${RESET}"
         fi
     fi
 
