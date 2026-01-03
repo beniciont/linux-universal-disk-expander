@@ -4,52 +4,46 @@
 > **ESTA É UMA VERSÃO DE DESENVOLVIMENTO (BETA).**
 > Use apenas para testes. Para produção, utilize a [branch main](https://github.com/beniciont/oci-linux-disk-expander/tree/main).
 
-[![Release](https://img.shields.io/github/v/release/beniciont/oci-linux-disk-expander?color=green&label=Release)](https://github.com/beniciont/oci-linux-disk-expander/releases)
+[![Release](https://img.shields.io/github/v/release/beniciont/oci-linux-disk-expander?color=orange&label=Beta)](https://github.com/beniciont/oci-linux-disk-expander/tree/develop)
 [![License](https://img.shields.io/github/license/beniciont/oci-linux-disk-expander?color=blue)](LICENSE)
 
-Ferramenta universal para expansão de discos e partições em instâncias Linux na **Oracle Cloud Infrastructure (OCI)**. Desenvolvida para simplificar o processo de redimensionamento de volumes, suportando desde discos simples até estruturas complexas de LVM.
+Ferramenta universal para expansão de discos e partições em instâncias Linux. Esta branch contém a versão **v2.9.0-beta**, focada em compatibilidade **Multi-Cloud** e **Virtualização**.
 
 ---
 
-## 🌟 Funcionalidades (v2.8.0)
+## 🌟 Funcionalidades em Teste (v2.9.0-beta)
 
-- **Detecção Universal:** Identifica automaticamente discos Raw, Particionados e LVM.
-- **Expansão Personalizada:** Escolha entre expandir 100% do espaço ou definir um valor específico (ex: 10G, 500M).
-- **Precisão de Setores:** Leitura direta do Kernel (`/sys/block`) para garantir que o espaço livre exibido seja real.
-- **Suporte a File Systems:** Compatível com **XFS**, **EXT4** e **BTRFS**.
-- **Segurança:** Verificação de bytes antes e depois da operação para confirmar o sucesso real.
-- **Rescan Automático:** Executa rescan de barramento iSCSI e Kernel automaticamente.
+- **Rescan Agnóstico:** Lógica inteligente para detectar novos espaços em **Proxmox, VMware, Hyper-V, Azure e AWS**.
+- **Detecção de Ambiente:** Identifica automaticamente se está em OCI ou outros provedores para aplicar o melhor método de rescan.
+- **Bus Scan SCSI:** Varredura profunda de barramentos SCSI para hipervisores locais.
+- **Tudo da v2.8.0:** Inclui todas as melhorias de expansão personalizada e precisão de setores.
 
 ---
 
-## 🚀 Como Usar (Execução Rápida)
+## 🧪 Como Testar (Execução Beta)
 
-Execute o comando abaixo como **root** para iniciar a ferramenta sem precisar baixar arquivos manualmente:
+Execute o comando abaixo para testar as novas funcionalidades de rescan universal:
 
 ```bash
 sudo bash -c "$(curl -sSL https://raw.githubusercontent.com/beniciont/oci-linux-disk-expander/develop/oci-expand-disk.sh)"
 ```
 
-
-
 ---
 
-## 🛠️ Estruturas Suportadas
+## 🛠️ Suporte Experimental
 
-| Tipo de Disco | Estrutura | Ação do Script |
+| Ambiente | Status | Método de Rescan |
 | :--- | :--- | :--- |
-| **Particionado** | sda1, sda2, sda3 | Expande a partição e o Sistema de Arquivos. |
-| **Raw Disk** | sdb, sdc (sem partições) | Expande o Sistema de Arquivos diretamente no disco. |
-| **LVM (Partição)** | sda3 -> PV -> VG -> LV | Expande Partição -> PV -> LV -> Sistema de Arquivos. |
-| **LVM (Raw)** | sdb -> PV -> VG -> LV | Expande PV -> LV -> Sistema de Arquivos. |
+| **Oracle Cloud (OCI)** | ✅ Estável | iSCSI + sysfs |
+| **Proxmox / KVM** | 🧪 Beta | SCSI Bus Scan |
+| **VMware / VirtualBox** | 🧪 Beta | SCSI Bus Scan + sysfs |
+| **Azure / AWS** | 🧪 Beta | sysfs + sgdisk |
 
 ---
 
-## 📝 Logs e Auditoria
+## 📝 Documentação de Desenvolvimento
 
-Todas as operações são registradas para sua segurança:
-- **Arquivo de Log:** `/var/log/oci-expand.log`
-- **Níveis de Log:** INFO, EXEC, DEBUG e WARN.
+Para detalhes técnicos sobre como contribuir ou o que está sendo testado, veja o arquivo [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ---
 
