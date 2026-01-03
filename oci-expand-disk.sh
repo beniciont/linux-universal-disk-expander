@@ -159,6 +159,7 @@ while true; do
 
     TAMANHO_ANTIGO=$(lsblk -bdno SIZE "/dev/$DISCO" | head -n1 | tr -d ' ')
     TAMANHO_ANTIGO_HUMANO=$(lsblk -dno SIZE "/dev/$DISCO" | head -n1)
+    FORCED_NO_SPACE=0
     
     log_message "INFO" "Disco selecionado: /dev/$DISCO (Tamanho atual: $TAMANHO_ANTIGO_HUMANO)"
     echo -e "\n${GREEN}DISCO SELECIONADO: /dev/$DISCO ($TAMANHO_ANTIGO_HUMANO)${RESET}"
@@ -215,6 +216,9 @@ while true; do
                 3) 
                    ESPACO_OCI=$(get_unallocated_space "$DISCO")
                    log_message "INFO" "Usuário forçou prosseguimento. Espaço OCI: ${ESPACO_OCI}GB"
+                       if (( $(echo "$ESPACO_OCI <= 0" | bc -l) )); then
+                           FORCED_NO_SPACE=1
+                       fi
                    echo -e "\n${YELLOW}Forçando prosseguimento...${RESET}"
                    echo "Espaço não alocado detectado: ${ESPACO_OCI} GB"
                    sleep 1; break ;;
@@ -249,6 +253,8 @@ while true; do
         read TENTAR
         if [[ ${TENTAR,,} != 's' ]]; then
             log_message "INFO" "Usuário desistiu da expansão sem espaço detectado."
+            echo -e "\n${YELLOW}${BOLD}INALTERADO: Operação não realizada — não há espaço livre no disco (OCI).${RESET}\n"
+            sleep 1
             continue
         fi
         log_message "WARN" "Usuário forçou expansão com 0GB detectados em /dev/$DISCO."
@@ -419,11 +425,19 @@ while true; do
             FINAL_MSG="${GREEN}${BOLD}SUCESSO! Expansão concluída.${RESET}"
             ERROR_DETAIL=""
         else
-            FINAL_MSG="${YELLOW}${BOLD}INALTERADO: O tamanho final não mudou. Verifique se há espaço real no disco físico (OCI Console).${RESET}"
+            if [[ "$FORCED_NO_SPACE" -eq 1 ]]; then
+                FINAL_MSG="${YELLOW}${BOLD}INALTERADO: Nenhuma alteração realizada — você forçou a operação mas não havia espaço livre no disco (OCI).${RESET}"
+            else
+                FINAL_MSG="${YELLOW}${BOLD}INALTERADO: O tamanho final não mudou. Verifique se há espaço real no disco físico (OCI Console).${RESET}"
+            fi
             ERROR_DETAIL=""
         fi
     else
-        FINAL_MSG="${RED}${BOLD}$ERROR_DETAIL${RESET}"
+        if [[ -z "$ERROR_DETAIL" ]]; then
+            FINAL_MSG="${YELLOW}${BOLD}INALTERADO: Nenhuma alteração realizada. Possível falta de espaço livre no disco ou erro não identificado.${RESET}"
+        else
+            FINAL_MSG="${RED}${BOLD}$ERROR_DETAIL${RESET}"
+        fi
     fi
 
     # RESULTADO FINAL
