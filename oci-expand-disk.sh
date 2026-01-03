@@ -3,12 +3,12 @@
 # ==============================================================================
 # EXPANSAO OCI LINUX - FERRAMENTA UNIVERSAL
 # Criado por: Benicio Neto
-# Versão: 2.7.5 (PRODUÇÃO)
+# Versão: 2.7.6 (PRODUÇÃO)
 # Última Atualização: 03/01/2026
 #
 # HISTÓRICO DE VERSÕES:
-# 1.0.0 a 2.7.4 - Evolução e correções de bugs.
-# 2.7.5 (03/01/2026) - FIX: Correção de identificação de partição e cálculo de espaço real.
+# 1.0.0 a 2.7.5 - Evolução e correções de bugs.
+# 2.7.6 (03/01/2026) - FIX: Lógica de detecção de espaço livre baseada em lsblk (Raw/LVM).
 # ==============================================================================
 
 # Configurações de Log
@@ -59,6 +59,7 @@ check_dependencies() {
 get_unallocated_space() {
     local disk="/dev/$1"
     
+    # Tenta corrigir a tabela de partições GPT se houver espaço no final
     if command -v sgdisk &>/dev/null; then
         sudo sgdisk -e "$disk" >/dev/null 2>&1
     fi
@@ -70,19 +71,19 @@ get_unallocated_space() {
     local has_parts=$(lsblk -ln -o TYPE "$disk" | grep -q "part" && echo "yes" || echo "no")
     
     if [[ "$has_parts" == "yes" ]]; then
-        # Pega o fim da última partição física
+        # Se tem partição, o espaço usado é o fim da última partição física
         used_bytes=$(sudo parted -s "$disk" unit B print | grep -E "^ [0-9]+" | tail -n1 | awk '{print $3}' | tr -d 'B')
     else
-        # 2. Se não tem partição, verifica se é um PV LVM
-        local pv_size=$(sudo pvs --noheadings --units b --options pv_size "$disk" 2>/dev/null | grep -oE "[0-9]+" | head -n1)
-        if [[ -n "$pv_size" ]]; then
-            used_bytes=$pv_size
+        # 2. Se não tem partição, verifica o maior "filho" (LVM ou FS direto)
+        # O lsblk -b mostra o tamanho em bytes de todos os itens vinculados ao disco
+        local max_child_size=$(lsblk -bdno SIZE "$disk" | tail -n +2 | sort -rn | head -n1 | tr -d ' ')
+        
+        if [[ -n "$max_child_size" ]]; then
+            used_bytes=$max_child_size
         else
-            # 3. Se não é LVM, verifica se tem um Sistema de Arquivos direto
+            # 3. Se não tem filhos, verifica se o próprio disco tem um sistema de arquivos
             local has_fs=$(lsblk -no FSTYPE "$disk" | head -n1)
             if [[ -n "$has_fs" ]]; then
-                # Se tem FS direto, o espaço usado é o tamanho atual do FS (aproximado pelo tamanho do disco visto pelo kernel)
-                # Para evitar falsos positivos em discos raw, se tem FS, assumimos que ocupa tudo a menos que o disco tenha crescido
                 used_bytes=$disk_size_bytes
             else
                 used_bytes=0
@@ -92,11 +93,11 @@ get_unallocated_space() {
 
     local free_bytes=$((disk_size_bytes - used_bytes))
     
-    # Log de depuração
+    # Log de depuração interna
     log_message "DEBUG" "get_unallocated_space($disk): Total=$disk_size_bytes, Usado=$used_bytes, Livre=$free_bytes"
 
-    # Consideramos 0 se o espaço livre for menor que 10MB
-    if [[ "$free_bytes" -lt 10485760 ]]; then
+    # Consideramos 0 se o espaço livre for menor que 100MB (margem para metadados e alinhamento)
+    if [[ "$free_bytes" -lt 104857600 ]]; then
         echo "0"
     else
         echo "scale=2; $free_bytes / 1024 / 1024 / 1024" | bc
@@ -106,9 +107,9 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " EXPANSAO OCI LINUX v2.7.5 "
+    echo " EXPANSAO OCI LINUX v2.7.6 "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.7.5 (PRODUÇÃO)"
+    echo " Versão: 2.7.6 (PRODUÇÃO)"
     echo " Última Atualização: 03/01/2026 "
     echo "=================================="
     echo
@@ -138,7 +139,7 @@ progress() {
 }
 
 # Início do Script
-log_message "START" "Script Universal v2.7.5 iniciado."
+log_message "START" "Script Universal v2.7.6 iniciado."
 check_dependencies
 
 while true; do
@@ -182,10 +183,6 @@ while true; do
 
         # Lógica de Sucesso: Só é sucesso se houver espaço não alocado real (> 0)
         if (( $(echo "$ESPACO_OCI > 0" | bc -l) )); then
-            GANHO_BYTES=$((TAMANHO_ATUAL_DISCO - TAMANHO_INICIAL_DISCO))
-            [[ $GANHO_BYTES -lt 0 ]] && GANHO_BYTES=0
-            GANHO_GB=$(echo "scale=2; $GANHO_BYTES / 1024 / 1024 / 1024" | bc)
-            
             echo -e "\n${GREEN}${BOLD}SUCESSO! Espaço novo detectado.${RESET}"
             echo "Tamanho Atual: $TAMANHO_ATUAL_HUMANO"
             echo "Espaço não alocado (OCI): ${ESPACO_OCI} GB"
@@ -215,11 +212,9 @@ while true; do
     echo "======================"
 
     HAS_PART=$(lsblk -ln -o TYPE "/dev/$DISCO" | grep -q "part" && echo "yes" || echo "no")
-    HAS_LVM=$(lsblk -ln -o FSTYPE "/dev/$DISCO" | grep -qi "LVM" && echo "yes" || echo "no")
     
     if [[ "$HAS_PART" == "yes" ]]; then
         MODO="PART"
-        # Lista as partições para o usuário escolher
         PARTS_AVAILABLE=$(lsblk -ln -o NAME,TYPE "/dev/$DISCO" | grep "part" | awk '{print $1}')
         echo -e "\n${BLUE}Partições encontradas: $PARTS_AVAILABLE${RESET}"
         echo -n "Digite o nome da partição que deseja expandir (ex: sda3): "
@@ -237,20 +232,29 @@ while true; do
         # Verifica se a partição escolhida contém LVM
         if lsblk -no FSTYPE "$ALVO_NOME" | grep -qi "LVM"; then
             HAS_LVM="yes"
-            # Pega o LV montado dentro dessa partição
             REAL_LV=$(lsblk -ln -o NAME,TYPE "$ALVO_NOME" | grep "lvm" | head -n1 | awk '{print $1}')
             [[ -n "$REAL_LV" ]] && ALVO_LVM="/dev/mapper/$REAL_LV" || ALVO_LVM=""
+        else
+            HAS_LVM="no"
+            ALVO_LVM=""
         fi
     else
         MODO="RAW"
         ALVO_NOME="/dev/$DISCO"
         MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | head -n1)
         TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | head -n1)
-        ALVO_LVM=""
+        
+        # Verifica se o disco raw contém LVM
+        if lsblk -no FSTYPE "$ALVO_NOME" | grep -qi "LVM"; then
+            HAS_LVM="yes"
+            REAL_LV=$(lsblk -ln -o NAME,TYPE "$ALVO_NOME" | grep "lvm" | head -n1 | awk '{print $1}')
+            [[ -n "$REAL_LV" ]] && ALVO_LVM="/dev/mapper/$REAL_LV" || ALVO_LVM=""
+        else
+            HAS_LVM="no"
+            ALVO_LVM=""
+        fi
     fi
 
-    # Captura tamanho inicial do FS para comparação final
-    # Se tiver LVM, o alvo do FS é o LV, senão é a partição/disco
     FINAL_TARGET="${ALVO_LVM:-$ALVO_NOME}"
     
     if [[ -n "$MOUNT" && "$MOUNT" != "" ]]; then
@@ -276,7 +280,6 @@ while true; do
 
     if [[ "$HAS_LVM" == "yes" ]]; then
         progress 2 "Redimensionando Physical Volume (PV)..."
-        # PV pode estar no disco ou na partição
         PV_TARGET=$(pvs --noheadings -o pv_name | grep "$DISCO" | head -n1 | xargs)
         [[ -z "$PV_TARGET" ]] && PV_TARGET="$ALVO_NOME"
         sudo pvresize "$PV_TARGET" >/dev/null 2>&1
@@ -296,7 +299,6 @@ while true; do
         esac
     fi
 
-    # Verificação Final
     if [[ -n "$MOUNT" && "$MOUNT" != "" ]]; then
         FS_SIZE_AFTER=$(df -B1 "$MOUNT" | tail -n1 | awk '{print $2}')
     else
