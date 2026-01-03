@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # ==============================================================================
-# EXPANSAO OCI LINUX - FERRAMENTA UNIVERSAL
+# LINUX DISK EXPANDER - FERRAMENTA UNIVERSAL (MULTI-CLOUD & VIRTUAL)
 # Criado por: Benicio Neto
-# Versão: 2.8.0 (PRODUÇÃO)
+# Versão: 2.9.0-beta (DESENVOLVIMENTO)
 # Última Atualização: 03/01/2026
 #
 # HISTÓRICO DE VERSÕES:
-# 1.0.0 a 2.7.8 - Evolução e correções de bugs.
-# 2.8.0 (03/01/2026) - NEW: Opção de expansão total ou parcial (GB/MB).
+# 1.0.0 a 2.8.0 - Evolução focada em OCI.
+# 2.9.0-beta (03/01/2026) - NEW: Rescan agnóstico (OCI, Azure, AWS, VirtualBox).
 # ==============================================================================
 
 # Configurações de Log
@@ -55,7 +55,7 @@ check_dependencies() {
     done
 }
 
-# Função para obter o espaço não alocado (Espaço OCI)
+# Função para obter o espaço não alocado
 get_unallocated_space() {
     local disk_name=$1
     local disk="/dev/$disk_name"
@@ -103,10 +103,10 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " EXPANSAO OCI LINUX v2.8.0 "
+    echo " LINUX DISK EXPANDER v2.9.0-beta "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.8.0 (PRODUÇÃO)"
-    echo " Última Atualização: 03/01/2026 "
+    echo " Versão: 2.9.0-beta (TESTE)"
+    echo " Ambiente: Multi-Cloud / Virtual"
     echo "=================================="
     echo
 }
@@ -135,7 +135,7 @@ progress() {
 }
 
 # Início do Script
-log_message "START" "Script Universal v2.8.0 iniciado."
+log_message "START" "Script Universal v2.9.0-beta iniciado."
 check_dependencies
 
 while true; do
@@ -160,17 +160,28 @@ while true; do
     echo -e "\n${GREEN}DISCO SELECIONADO: /dev/$DISCO ($TAMANHO_INICIAL_HUMANO)${RESET}"
     pause_nav || continue
 
-    # PASSO 2: RESCAN
+    # PASSO 2: RESCAN AGNOSTICO
     while true; do
         header
         echo "${YELLOW}PASSO 2: Rescan do Kernel e Barramento${RESET}"
         echo "=========================="
         
-        progress 2 "Atualizando /sys/class/block/$DISCO..."
+        progress 2 "Atualizando Kernel via sysfs (/sys/class/block)..."
         [ -f "/sys/class/block/$DISCO/device/rescan" ] && echo 1 | sudo tee "/sys/class/block/$DISCO/device/rescan" >/dev/null 2>&1
-        progress 2 "Rescan iSCSI OCI..."
-        sudo iscsiadm -m node -R >/dev/null 2>&1 && sudo iscsiadm -m session -R >/dev/null 2>&1
-        progress 2 "Sincronizando partições..."
+        
+        # Rescan de barramento SCSI genérico
+        if [ -d "/sys/class/scsi_host" ]; then
+            progress 2 "Rescan de barramento SCSI genérico..."
+            for host in /sys/class/scsi_host/host*; do echo "- - -" | sudo tee "$host/scan" >/dev/null 2>&1; done
+        fi
+
+        # Rescan específico para OCI (iSCSI)
+        if command -v iscsiadm &>/dev/null; then
+            progress 2 "Detectado iSCSI. Executando rescan específico..."
+            sudo iscsiadm -m node -R >/dev/null 2>&1 && sudo iscsiadm -m session -R >/dev/null 2>&1
+        fi
+
+        progress 2 "Sincronizando tabela de partições (partprobe)..."
         sudo partprobe "/dev/$DISCO" >/dev/null 2>&1
         
         TAMANHO_ATUAL_DISCO=$(cat "/sys/block/$DISCO/size" 2>/dev/null)
@@ -182,7 +193,7 @@ while true; do
         if (( $(echo "$ESPACO_OCI > 0" | bc -l) )); then
             echo -e "\n${GREEN}${BOLD}SUCESSO! Espaço novo detectado.${RESET}"
             echo "Tamanho Atual: $TAMANHO_ATUAL_HUMANO"
-            echo "Espaço não alocado (OCI): ${ESPACO_OCI} GB"
+            echo "Espaço não alocado: ${ESPACO_OCI} GB"
             pause_nav && break || continue 2
         else
             echo -e "\n${RED}AVISO: Nenhum espaço novo detectado ($TAMANHO_ATUAL_HUMANO).${RESET}"
@@ -288,7 +299,6 @@ while true; do
         if [[ -z "$EXP_VALUE" ]]; then
             sudo growpart "/dev/$DISCO" "$PART_NUM" >/dev/null 2>&1 || sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" 100% >/dev/null 2>&1
         else
-            # Para valor específico em partição, usamos parted
             sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" "$EXP_VALUE" >/dev/null 2>&1
         fi
         sudo partprobe "/dev/$DISCO" >/dev/null 2>&1
