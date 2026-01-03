@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # ==============================================================================
-# EXPANSAO OCI LINUX
+# EXPANSAO OCI LINUX - FERRAMENTA UNIVERSAL
 # Criado por: Benicio Neto
-# Versão: 2.6.0 (PRODUÇÃO)
+# Versão: 2.7.0 (PRODUÇÃO)
 # Última Atualização: 03/01/2026
 #
 # HISTÓRICO DE VERSÕES:
-# 1.0.0 a 2.5.9 - Evolução e correções de bugs.
-# 2.6.0 (03/01/2026) - NEW: Suporte a discos sem partições (Raw Disks/LVM Direto).
+# 1.0.0 a 2.6.0 - Evolução e suporte a discos Raw.
+# 2.7.0 (03/01/2026) - UNIVERSAL: Suporte completo a Raw, Partições, LVM e FS.
 # ==============================================================================
 
 # Configurações de Log
@@ -41,16 +41,18 @@ log_message() {
 
 # Função para instalar dependências
 check_dependencies() {
-    if ! command -v sgdisk &>/dev/null; then
-        log_message "INFO" "gdisk não encontrado. Tentando instalar..."
-        echo "${YELLOW}Instalando ferramenta necessária (gdisk)...${RESET}"
-        if command -v yum &>/dev/null; then
-            sudo yum install -y gdisk >/dev/null 2>&1
-        elif command -v apt-get &>/dev/null; then
-            sudo apt-get update >/dev/null 2>&1
-            sudo apt-get install -y gdisk >/dev/null 2>&1
+    local deps=("gdisk" "util-linux" "parted" "xfsprogs" "e2fsprogs")
+    for dep in "${deps[@]}"; do
+        if ! command -v "$dep" &>/dev/null && [[ "$dep" != "util-linux" ]]; then
+            log_message "INFO" "$dep não encontrado. Tentando instalar..."
+            if command -v yum &>/dev/null; then
+                sudo yum install -y "$dep" >/dev/null 2>&1
+            elif command -v apt-get &>/dev/null; then
+                sudo apt-get update >/dev/null 2>&1
+                sudo apt-get install -y "$dep" >/dev/null 2>&1
+            fi
         fi
-    fi
+    done
 }
 
 # Função para traduzir e padronizar erros
@@ -60,14 +62,8 @@ friendly_error() {
         echo "INALTERADO: O volume já possui o tamanho solicitado ou não há novo espaço."
     elif echo "$raw_msg" | grep -qiE "insufficient free space|not enough free space"; then
         echo "ERRO: Não há espaço livre disponível no disco físico para esta expansão."
-    elif echo "$raw_msg" | grep -qi "no tools available.*gpt"; then
-        echo "ERRO: Faltam ferramentas do sistema (gdisk) para manipular partições GPT."
-    elif echo "$raw_msg" | grep -qi "no space left"; then
-        echo "ERRO: Não foi encontrado espaço livre após a partição selecionada."
-    elif echo "$raw_msg" | grep -qi "outside of device"; then
-        echo "ERRO: O tamanho solicitado é maior do que o disco físico permite."
     elif echo "$raw_msg" | grep -qi "being used"; then
-        echo "" # Silenciamos avisos de uso, pois a verificação de bytes é soberana
+        echo "" # Silenciamos avisos de uso
     else
         echo "ERRO TÉCNICO: $raw_msg"
     fi
@@ -76,36 +72,26 @@ friendly_error() {
 # Função para obter o espaço não alocado (Espaço OCI)
 get_unallocated_space() {
     local disk="/dev/$1"
-    
     check_dependencies
-
-    if command -v sgdisk &>/dev/null; then
-        sudo sgdisk -e "$disk" >/dev/null 2>&1
-    fi
+    if command -v sgdisk &>/dev/null; then sudo sgdisk -e "$disk" >/dev/null 2>&1; fi
 
     local disk_size_bytes=$(lsblk -bdno SIZE "$disk" | head -n1 | tr -d ' ')
     local last_part_end=$(sudo parted -s "$disk" unit B print | grep -E "^ [0-9]+" | tail -n1 | awk '{print $3}' | tr -d 'B')
     
     if [[ -z "$last_part_end" ]]; then
-        # Se não houver partições, o espaço livre é a diferença entre o tamanho do disco e o uso de LVM/FS direto
-        # Para simplificar em discos raw, consideramos o tamanho total como disponível para expansão do PV/FS
         echo "scale=2; $disk_size_bytes / 1024 / 1024 / 1024" | bc
     else
         local free_bytes=$((disk_size_bytes - last_part_end))
-        if [[ "$free_bytes" -lt 1048576 ]]; then
-            echo "0"
-        else
-            echo "scale=2; $free_bytes / 1024 / 1024 / 1024" | bc
-        fi
+        if [[ "$free_bytes" -lt 1048576 ]]; then echo "0"; else echo "scale=2; $free_bytes / 1024 / 1024 / 1024" | bc; fi
     fi
 }
 
 header() {
     clear
     echo "=================================="
-    echo " EXPANSAO OCI LINUX v2.6.0 "
+    echo " EXPANSAO OCI LINUX v2.7.0 "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.6.0 (PRODUÇÃO)"
+    echo " Versão: 2.7.0 (UNIVERSAL)"
     echo " Última Atualização: 03/01/2026 "
     echo "=================================="
     echo
@@ -116,12 +102,8 @@ pause_nav() {
     echo -n "${YELLOW}[ENTER] continuar (v=voltar / q=sair): ${RESET}"
     read resp
     case ${resp,,} in
-        'q') 
-            log_message "INFO" "Usuário solicitou saída (q)."
-            exit 0 ;;
-        'v') 
-            log_message "INFO" "Usuário solicitou voltar (v)."
-            return 1 ;;
+        'q') exit 0 ;;
+        'v') return 1 ;;
         *) return 0 ;;
     esac
 }
@@ -132,14 +114,14 @@ progress() {
     log_message "EXEC" "$msg"
     for ((i=1; i<=steps; i++)); do
         printf "    [%3d%%] " $((i*100/steps))
-        sleep 0.5
+        sleep 0.3
         printf "\r               \r"
     done
     echo "  ${GREEN}[OK]${RESET} $msg"
 }
 
 # Início do Script
-log_message "START" "Script iniciado."
+log_message "START" "Script Universal iniciado."
 check_dependencies
 
 while true; do
@@ -152,291 +134,137 @@ while true; do
     echo -n "${BLUE}Digite o nome do disco (ex: sda, sdb): ${RESET}"
     read DISCO
     
-    [[ ${DISCO,,} == 'q' ]] && log_message "INFO" "Saída no Passo 1." && exit 0
+    [[ ${DISCO,,} == 'q' ]] && exit 0
     if [[ -z "$DISCO" || ! -b "/dev/$DISCO" ]]; then
-        echo "${RED}ERRO: Disco /dev/$DISCO não encontrado!${RESET}"
-        log_message "ERROR" "Disco /dev/$DISCO não encontrado ou inválido."
-        sleep 2; continue
+        echo "${RED}ERRO: Disco /dev/$DISCO não encontrado!${RESET}"; sleep 2; continue
     fi
 
     TAMANHO_ANTIGO=$(lsblk -bdno SIZE "/dev/$DISCO" | head -n1 | tr -d ' ')
     TAMANHO_ANTIGO_HUMANO=$(lsblk -dno SIZE "/dev/$DISCO" | head -n1)
-    
-    log_message "INFO" "Disco selecionado: /dev/$DISCO (Tamanho atual: $TAMANHO_ANTIGO_HUMANO)"
     echo -e "\n${GREEN}DISCO SELECIONADO: /dev/$DISCO ($TAMANHO_ANTIGO_HUMANO)${RESET}"
     pause_nav || continue
 
-    # PASSO 2: RESCAN DO KERNEL
+    # PASSO 2: RESCAN
     while true; do
         header
-        echo "${YELLOW}PASSO 2: Rescan do Kernel${RESET}"
+        echo "${YELLOW}PASSO 2: Rescan do Kernel e Barramento${RESET}"
         echo "=========================="
-        
-        progress 2 "Atualizando /dev/$DISCO via sysfs..."
-        if [ -f "/sys/class/block/$DISCO/device/rescan" ]; then
-            echo 1 | sudo tee "/sys/class/block/$DISCO/device/rescan" >/dev/null 2>&1
-        fi
-        
-        progress 2 "Executando rescan iSCSI (OCI)..."
-        sudo iscsiadm -m node -R >/dev/null 2>&1
-        sudo iscsiadm -m session -R >/dev/null 2>&1
-        
-        progress 2 "Sincronizando tabela de partições..."
+        progress 2 "Atualizando /sys/class/block/$DISCO..."
+        [ -f "/sys/class/block/$DISCO/device/rescan" ] && echo 1 | sudo tee "/sys/class/block/$DISCO/device/rescan" >/dev/null 2>&1
+        progress 2 "Rescan iSCSI OCI..."
+        sudo iscsiadm -m node -R >/dev/null 2>&1 && sudo iscsiadm -m session -R >/dev/null 2>&1
+        progress 2 "Sincronizando partições..."
         sudo partprobe "/dev/$DISCO" >/dev/null 2>&1
         
-        sleep 2
-
         TAMANHO_NOVO=$(lsblk -bdno SIZE "/dev/$DISCO" | head -n1 | tr -d ' ')
         TAMANHO_NOVO_HUMANO=$(lsblk -dno SIZE "/dev/$DISCO" | head -n1)
-
         ESPACO_OCI=$(get_unallocated_space "$DISCO")
 
         if [ "$TAMANHO_NOVO" -gt "$TAMANHO_ANTIGO" ] || (( $(echo "$ESPACO_OCI > 0" | bc -l) )); then
-            log_message "SUCCESS" "Espaço OCI detectado: ${ESPACO_OCI}GB"
             echo -e "\n${GREEN}SUCESSO! Espaço novo detectado.${RESET}"
-            echo "Tamanho do Disco: $TAMANHO_NOVO_HUMANO"
-            echo "Espaço não alocado (OCI): ${ESPACO_OCI} GB"
+            echo "Tamanho: $TAMANHO_NOVO_HUMANO | Livre (OCI): ${ESPACO_OCI} GB"
             pause_nav && break || continue 2
         else
-            log_message "WARN" "Rescan não detectou mudança no tamanho do disco ($TAMANHO_NOVO_HUMANO)."
             echo -e "\n${RED}AVISO: O tamanho do disco não mudou ($TAMANHO_NOVO_HUMANO).${RESET}"
-            echo "--------------------------------------------------"
-            echo "${BOLD}${YELLOW}ORIENTAÇÃO:${RESET}"
-            echo "1. Valide na console da OCI se o disco realmente foi expandido."
-            echo "2. Se já expandiu na console, tente a opção 'Rescan SCSI' abaixo."
-            echo "--------------------------------------------------"
-            echo -e "${CYAN}Escolha uma ação técnica:${RESET}"
-            echo "1) Rescan SCSI  2) Tentar de novo  3) Seguir mesmo assim  v) Voltar  q) Sair"
-            echo -n -e "\n${BLUE}Opção: ${RESET}"
-            read OPT
-            case ${OPT,,} in
-                1) 
-                    log_message "INFO" "Executando rescan-scsi-bus.sh"
-                    if command -v rescan-scsi-bus.sh &>/dev/null; then sudo rescan-scsi-bus.sh; fi; sleep 2; continue ;;
-                2) continue ;;
-                3) 
-                   ESPACO_OCI=$(get_unallocated_space "$DISCO")
-                   log_message "INFO" "Usuário forçou prosseguimento. Espaço OCI: ${ESPACO_OCI}GB"
-                   echo -e "\n${YELLOW}Forçando prosseguimento...${RESET}"
-                   echo "Espaço não alocado detectado: ${ESPACO_OCI} GB"
-                   sleep 1; break ;;
-                'v') continue 2 ;;
-                'q') exit 0 ;;
+            echo "1) Rescan SCSI  2) Tentar de novo  3) Seguir mesmo assim  v) Voltar"
+            read -p "Opção: " OPT
+            case $OPT in
+                1) sudo rescan-scsi-bus.sh 2>/dev/null; continue ;;
+                3) break ;;
+                v) continue 2 ;;
                 *) continue ;;
             esac
         fi
     done
 
-    # PASSO 3: ESTRUTURA E TAMANHO
+    # PASSO 3: DETECÇÃO UNIVERSAL
     header
-    echo "${CYAN}PASSO 3: Estrutura e Definição de Tamanho${RESET}"
+    echo "${CYAN}PASSO 3: Estrutura Detectada${RESET}"
     echo "======================"
-    echo "${BOLD}Utilização Atual das Partições em /dev/$DISCO:${RESET}"
-    
-    # Detecção de Partições ou Estrutura Raw
-    PARTS_LIST=$(lsblk -ln -o NAME,TYPE "/dev/$DISCO" | grep "part" | awk '{print $1}')
-    IS_RAW_LVM=$(lsblk -ln -o NAME,TYPE "/dev/$DISCO" | grep "lvm" | head -n1)
-    IS_RAW_FS=$(lsblk -ln -o NAME,TYPE,MOUNTPOINT "/dev/$DISCO" | grep "disk" | awk '$3 != "" {print $1}')
-
-    if [[ -n "$PARTS_LIST" ]]; then
-        for p in $PARTS_LIST; do
-            MOUNT_P=$(lsblk -no MOUNTPOINT "/dev/$p" | tr -d ' ')
-            if [[ -n "$MOUNT_P" && "$MOUNT_P" != "" && "$MOUNT_P" != "[SWAP]" ]]; then
-                df -h "$MOUNT_P" | tail -n1 | awk '{printf "  %-10s %-5s %-5s %-5s %-4s %s\n", $1, $2, $3, $4, $5, $6}'
-            fi
-        done
-    elif [[ -n "$IS_RAW_LVM" || -n "$IS_RAW_FS" ]]; then
-        # Se for disco raw (sem partição), mostra o ponto de montagem do disco ou do LV direto
-        MOUNT_P=$(lsblk -no MOUNTPOINT "/dev/$DISCO" | grep "/" | head -n1)
-        [[ -z "$MOUNT_P" ]] && MOUNT_P=$(lsblk -ln -o MOUNTPOINT "/dev/$DISCO" | grep "/" | head -n1)
-        if [[ -n "$MOUNT_P" ]]; then
-            df -h "$MOUNT_P" | tail -n1 | awk '{printf "  %-10s %-5s %-5s %-5s %-4s %s\n", $1, $2, $3, $4, $5, $6}'
-        fi
-    fi
-
-    echo "----------------------"
-    lsblk "/dev/$DISCO" -f
+    lsblk "/dev/$DISCO" -o NAME,FSTYPE,SIZE,MOUNTPOINT,TYPE
     echo "======================"
-    
-    # AVISO DE ESPAÇO 0
-    if (( $(echo "$ESPACO_OCI <= 0" | bc -l) )); then
-        echo -e "\n${RED}${BOLD}ATENÇÃO: O script não detectou espaço livre (OCI) neste disco.${RESET}"
-        echo "Se você prosseguir, a expansão provavelmente falhará ou não mudará nada."
-        echo -n -e "\n${YELLOW}Deseja tentar mesmo assim? (s/n): ${RESET}"
-        read TENTAR
-        if [[ ${TENTAR,,} != 's' ]]; then
-            log_message "INFO" "Usuário desistiu da expansão sem espaço detectado."
-            continue
-        fi
-        log_message "WARN" "Usuário forçou expansão com 0GB detectados em /dev/$DISCO."
-    fi
 
-    # Lógica de Decisão de Estrutura
-    IS_LVM=$(lsblk -no FSTYPE "/dev/$DISCO" | grep -i "LVM")
+    # Identificação de Cenário
+    HAS_PART=$(lsblk -ln -o TYPE "/dev/$DISCO" | grep -q "part" && echo "yes" || echo "no")
+    HAS_LVM=$(lsblk -ln -o FSTYPE "/dev/$DISCO" | grep -qi "LVM" && echo "yes" || echo "no")
     
-    if [[ -n "$IS_LVM" ]]; then
+    if [[ "$HAS_LVM" == "yes" ]]; then
         MODO="LVM"
-        REAL_LV=$(lsblk -ln -o NAME,TYPE "/dev/$DISCO" | grep "lvm" | head -n1 | awk '{print $1}')
-        ALVO_NOME="/dev/mapper/$REAL_LV"
-        MOUNT=$(lsblk -ln -o MOUNTPOINT "/dev/$DISCO" | grep "/" | head -n1)
-        TYPE=$(lsblk -ln -o FSTYPE "/dev/$DISCO" | grep -v "LVM" | head -n1)
-        
-        echo -e "\n${YELLOW}ESTRUTURA LVM DETECTADA.${RESET}"
-        echo "Espaço novo disponível (OCI): ${ESPACO_OCI} GB"
-        echo -e "\n${BLUE}Quanto deseja expandir em $ALVO_NOME?${RESET}"
-        echo "1) Tudo (Usar os ${ESPACO_OCI}GB novos)"
-        echo "2) Personalizado (Ex: 500M, 5G)"
-        echo -n "Escolha: "
-        read SIZE_OPT
-        if [[ "$SIZE_OPT" == "2" ]]; then
-            echo -n "Digite o valor (ex: 500M ou 5G): "
-            read VALOR
-            [[ $VALOR != +* ]] && VALOR="+$VALOR"
-            TAMANHO_EXPANSAO="$VALOR"
-            LVM_PARAM="-L"
-        else
-            TAMANHO_EXPANSAO="+100%FREE"
-            LVM_PARAM="-l"
-        fi
-    elif [[ -n "$PARTS_LIST" ]]; then
-        MODO="PART"
-        SUGESTAO=$(echo "$PARTS_LIST" | paste -sd "/" -)
-        echo -n -e "\n${BLUE}Qual partição expandir? ($SUGESTAO): ${RESET}"
-        read PART
-        [[ ${PART,,} == 'v' ]] && continue
-        
-        PART_NUM=$(echo "$PART" | grep -oE "[0-9]+$" | tail -1)
-        MOUNT=$(lsblk -no MOUNTPOINT "/dev/$PART" 2>/dev/null | tr -d ' ')
-        TYPE=$(lsblk -no FSTYPE "/dev/$PART" 2>/dev/null)
-        ALVO_NOME="/dev/$PART"
-        
-        echo -e "\n${YELLOW}ESTRUTURA DE PARTIÇÃO PADRÃO DETECTADA.${RESET}"
-        echo "Espaço novo disponível (OCI): ${ESPACO_OCI} GB"
-        echo -e "\n${BLUE}Quanto deseja expandir em $ALVO_NOME?${RESET}"
-        echo "1) Tudo (Usar todo o espaço novo)"
-        echo "2) Personalizado (Ex: 500M, 5G)"
-        echo -n "Escolha: "
-        read SIZE_OPT
-        if [[ "$SIZE_OPT" == "2" ]]; then
-            echo -n "Digite o valor (ex: 500M ou 5G): "
-            read VALOR
-            VALOR_LIMPO=$(echo "$VALOR" | tr -d '+')
-            ATUAL_FIM=$(sudo parted -s "/dev/$DISCO" unit B print | grep -E "^ $PART_NUM" | awk '{print $3}' | tr -d 'B')
-            MULT=1
-            case ${VALOR_LIMPO: -1} in
-                [Gg]) MULT=$((1024*1024*1024)) ;;
-                [Mm]) MULT=$((1024*1024)) ;;
-                [Tt]) MULT=$((1024*1024*1024*1024)) ;;
-            esac
-            NUM_VALOR=$(echo "$VALOR_LIMPO" | grep -oE "[0-9]+")
-            ADD_BYTES=$((NUM_VALOR * MULT))
-            NOVO_FIM=$((ATUAL_FIM + ADD_BYTES))
-            TAMANHO_EXPANSAO="${NOVO_FIM}B"
-            METODO_PART="parted"
-        else
-            TAMANHO_EXPANSAO="100%"
-            METODO_PART="growpart"
-        fi
-    elif [[ -n "$IS_RAW_FS" ]]; then
-        MODO="RAW_FS"
-        ALVO_NOME="/dev/$DISCO"
-        MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | grep "/" | head -n1)
+        # Pega o LV que tem ponto de montagem, priorizando a raiz /
+        ALVO_NOME=$(lsblk -ln -o NAME,MOUNTPOINT "/dev/$DISCO" | grep "lvm" | sort -k2 -r | head -n1 | awk '{print "/dev/mapper/"$1}')
+        MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | head -n1)
         TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | head -n1)
-        echo -e "\n${YELLOW}DISCO RAW (SEM PARTIÇÃO) COM SISTEMA DE ARQUIVOS DETECTADO.${RESET}"
-        echo "Espaço novo disponível (OCI): ${ESPACO_OCI} GB"
-        echo -e "\n${BLUE}O script expandirá o sistema de arquivos diretamente em $ALVO_NOME.${RESET}"
+        echo -e "${YELLOW}CENÁRIO: LVM Detectado ($ALVO_NOME)${RESET}"
+    elif [[ "$HAS_PART" == "yes" ]]; then
+        MODO="PART"
+        PART_NOME=$(lsblk -ln -o NAME,MOUNTPOINT "/dev/$DISCO" | grep "part" | sort -k2 -r | head -n1 | awk '{print $1}')
+        ALVO_NOME="/dev/$PART_NOME"
+        PART_NUM=$(echo "$PART_NOME" | grep -oE "[0-9]+$" | tail -1)
+        MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | head -n1)
+        TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | head -n1)
+        echo -e "${YELLOW}CENÁRIO: Partição Padrão Detectada ($ALVO_NOME)${RESET}"
     else
-        echo "${RED}ERRO: Nenhuma estrutura reconhecida!${RESET}"; sleep 2; continue
-    fi
-    
-    # --- CAPTURA DO TAMANHO INICIAL ---
-    if [[ -n "$MOUNT" && "$MOUNT" != "livre" ]]; then
-        FS_SIZE_BEFORE=$(df -B1 "$MOUNT" | tail -n1 | awk '{print $2}')
-    else
-        FS_SIZE_BEFORE=$(lsblk -bdno SIZE "$ALVO_NOME" | head -n1)
+        MODO="RAW"
+        ALVO_NOME="/dev/$DISCO"
+        MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | head -n1)
+        TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | head -n1)
+        echo -e "${YELLOW}CENÁRIO: Disco Raw (Sem Partição) Detectado${RESET}"
     fi
 
-    pause_nav || continue
+    # Captura tamanho inicial para comparação final
+    [[ -n "$MOUNT" ]] && FS_SIZE_BEFORE=$(df -B1 "$MOUNT" | tail -n1 | awk '{print $2}') || FS_SIZE_BEFORE=$(lsblk -bdno SIZE "$ALVO_NOME" | head -n1)
 
-    # PASSO 4: EXECUÇÃO DA EXPANSÃO
+    echo -e "\n${BLUE}Deseja expandir $ALVO_NOME usando todo o espaço disponível? (s/n)${RESET}"
+    read CONFIRM
+    [[ ${CONFIRM,,} != 's' ]] && continue
+
+    # PASSO 4: EXECUÇÃO UNIVERSAL
     header
-    echo "${GREEN}PASSO 4: Executando expansão ($MODO)${RESET}"
+    echo "${GREEN}PASSO 4: Executando Expansão Universal${RESET}"
     echo "================================"
     
-    EXP_SUCCESS=0
-    ERROR_DETAIL=""
-    FINAL_MSG=""
-
-    if [[ "$MODO" == "LVM" ]]; then
-        progress 2 "pvresize /dev/$DISCO..."
-        sudo pvresize "/dev/$DISCO" >/dev/null 2>&1
-        progress 2 "lvextend $LVM_PARAM $TAMANHO_EXPANSAO $ALVO_NOME..."
-        CMD_OUT=$(sudo lvextend "$LVM_PARAM" "$TAMANHO_EXPANSAO" "$ALVO_NOME" 2>&1)
-        [[ $? -eq 0 ]] && EXP_SUCCESS=1 && TARGET_FS="$ALVO_NOME" || ERROR_DETAIL=$(friendly_error "$CMD_OUT")
-    elif [[ "$MODO" == "PART" ]]; then
-        if [[ "$METODO_PART" == "parted" ]]; then
-            progress 2 "parted resizepart $PART_NUM $TAMANHO_EXPANSAO..."
-            CMD_OUT=$(echo "Yes" | sudo parted "/dev/$DISCO" resizepart "$PART_NUM" "$TAMANHO_EXPANSAO" 2>&1)
-            [[ $? -eq 0 ]] && EXP_SUCCESS=1 || ERROR_DETAIL=$(friendly_error "$CMD_OUT")
-        else
-            progress 2 "growpart /dev/$DISCO $PART_NUM..."
-            CMD_OUT=$(sudo growpart "/dev/$DISCO" "$PART_NUM" 2>&1)
-            if [[ $? -eq 0 ]]; then
-                EXP_SUCCESS=1
-            else
-                progress 2 "Fallback: parted resizepart $PART_NUM 100%..."
-                CMD_OUT=$(echo "Yes" | sudo parted "/dev/$DISCO" resizepart "$PART_NUM" 100% 2>&1)
-                [[ $? -eq 0 ]] && EXP_SUCCESS=1 || ERROR_DETAIL=$(friendly_error "$CMD_OUT")
-            fi
-        fi
-        [[ $EXP_SUCCESS -ge 1 ]] && sudo partprobe "/dev/$DISCO" >/dev/null 2>&1 && TARGET_FS="$ALVO_NOME"
-    elif [[ "$MODO" == "RAW_FS" ]]; then
-        # Em disco raw, não precisa de growpart, vai direto para o resize do FS
-        EXP_SUCCESS=1
-        TARGET_FS="$ALVO_NOME"
+    # 1. Expandir o recipiente (Partição ou PV)
+    if [[ "$MODO" == "PART" ]]; then
+        progress 2 "Expandindo partição $PART_NUM..."
+        sudo growpart "/dev/$DISCO" "$PART_NUM" >/dev/null 2>&1 || sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" 100% >/dev/null 2>&1
+        sudo partprobe "/dev/$DISCO" >/dev/null 2>&1
     fi
 
-    if [[ $EXP_SUCCESS -ge 1 ]]; then
-        if [[ -n "$MOUNT" && "$MOUNT" != "livre" ]]; then
-            if [[ "$TYPE" == "xfs" ]]; then
-                progress 2 "xfs_growfs $MOUNT..."
-                sudo xfs_growfs "$MOUNT" >/dev/null 2>&1
-            else
-                progress 2 "resize2fs $TARGET_FS..."
-                sudo resize2fs "$TARGET_FS" >/dev/null 2>&1
-            fi
-        fi
+    if [[ "$HAS_LVM" == "yes" ]]; then
+        progress 2 "Redimensionando Physical Volume (PV)..."
+        # PV pode estar no disco ou na partição
+        PV_TARGET=$(pvs --noheadings -o pv_name | grep "$DISCO" | head -n1 | xargs)
+        sudo pvresize "$PV_TARGET" >/dev/null 2>&1
+        progress 2 "Expandindo Logical Volume (LV)..."
+        sudo lvextend -l +100%FREE "$ALVO_NOME" >/dev/null 2>&1
+    fi
+
+    # 2. Expandir o Sistema de Arquivos
+    if [[ -n "$MOUNT" ]]; then
+        progress 2 "Expandindo Sistema de Arquivos ($TYPE)..."
+        case "$TYPE" in
+            xfs) sudo xfs_growfs "$MOUNT" >/dev/null 2>&1 ;;
+            ext*) sudo resize2fs "$ALVO_NOME" >/dev/null 2>&1 ;;
+            btrfs) sudo btrfs filesystem resize max "$MOUNT" >/dev/null 2>&1 ;;
+        esac
     fi
 
     # Verificação Final
-    if [[ -n "$MOUNT" && "$MOUNT" != "livre" ]]; then
-        FS_SIZE_AFTER=$(df -B1 "$MOUNT" | tail -n1 | awk '{print $2}')
-    else
-        FS_SIZE_AFTER=$(lsblk -bdno SIZE "$ALVO_NOME" | head -n1)
-    fi
+    [[ -n "$MOUNT" ]] && FS_SIZE_AFTER=$(df -B1 "$MOUNT" | tail -n1 | awk '{print $2}') || FS_SIZE_AFTER=$(lsblk -bdno SIZE "$ALVO_NOME" | head -n1)
 
-    if [[ "$FS_SIZE_AFTER" -gt "$FS_SIZE_BEFORE" ]]; then
-        FINAL_MSG="${GREEN}${BOLD}SUCESSO! Expansão concluída.${RESET}"
-        log_message "SUCCESS" "Expansão realizada: $FS_SIZE_BEFORE -> $FS_SIZE_AFTER bytes."
-    else
-        FINAL_MSG="${YELLOW}${BOLD}INALTERADO: O tamanho final não mudou. Verifique se há espaço real no disco físico (OCI Console).${RESET}"
-        log_message "WARN" "Expansão concluída mas tamanho permaneceu inalterado."
-    fi
-
-    # RESULTADO FINAL
     header
     echo "${GREEN}RESULTADO FINAL${RESET}"
     echo "=================="
-    lsblk -f "$ALVO_NOME"
-    if [[ -n "$MOUNT" && "$MOUNT" != "livre" ]]; then
-        echo -e "\n${CYAN}Tamanho atual de $MOUNT:${RESET}"
-        df -h "$MOUNT" | grep -E "Filesystem|$ALVO_NOME"
-    fi
+    df -h "$MOUNT" 2>/dev/null || lsblk "$ALVO_NOME"
+    
     echo -e "\n--------------------------------------------------"
-    echo -e "STATUS: $FINAL_MSG"
-    [[ -n "$ERROR_DETAIL" && "$EXP_SUCCESS" -eq 0 ]] && echo -e "DETALHE: $ERROR_DETAIL"
+    if [[ "$FS_SIZE_AFTER" -gt "$FS_SIZE_BEFORE" ]]; then
+        echo -e "STATUS: ${GREEN}${BOLD}SUCESSO! Expansão concluída.${RESET}"
+    else
+        echo -e "STATUS: ${YELLOW}${BOLD}INALTERADO: O tamanho não mudou.${RESET}"
+    fi
     echo -e "--------------------------------------------------"
-    echo -e "\n${BLUE}Deseja realizar outra operação?${RESET}"
+    
     pause_nav || continue
     exit 0
 done
