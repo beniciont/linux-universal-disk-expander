@@ -3,7 +3,7 @@
 # ==============================================================================
 # LINUX UNIVERSAL DISK EXPANDER - MULTI-CLOUD & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 2.9.5-beta (DESENVOLVIMENTO)
+# Versão: 2.9.6-beta (DESENVOLVIMENTO)
 # Última Atualização: 04/01/2026
 #
 # HISTÓRICO DE VERSÕES:
@@ -14,6 +14,7 @@
 # 2.9.3-beta (04/01/2026) - FIX: Detecção de FSTYPE e proteção contra expansão vazia.
 # 2.9.4-beta (04/01/2026) - UI: Exibir espaço não alocado no menu de aviso de rescan.
 # 2.9.5-beta (04/01/2026) - FIX: Fallback de cálculo de espaço baseado no tamanho inicial.
+# 2.9.6-beta (04/01/2026) - FIX: Detecção de FSTYPE via file -s e persistência de tamanho inicial.
 # ==============================================================================
 
 # Configurações de Log
@@ -64,6 +65,7 @@ check_dependencies() {
 get_unallocated_space() {
     local disk_name=$1
     local disk="/dev/$disk_name"
+    local initial_size=$2
     
     if command -v sgdisk &>/dev/null; then
         sudo sgdisk -e "$disk" >/dev/null 2>&1
@@ -76,58 +78,22 @@ get_unallocated_space() {
     local has_parts=$(lsblk -ln -o TYPE "$disk" | grep -q "part" && echo "yes" || echo "no")
     
     if [[ "$has_parts" == "yes" ]]; then
-        # Para partições, pegamos o fim da última partição em bytes
         used_bytes=$(sudo parted -s "$disk" unit B print | grep -E "^ [0-9]+" | tail -n1 | awk '{print $3}' | tr -d 'B')
     else
-        # Se não tem partição, pode ser LVM direto no disco ou RAW
         local pv_size=$(sudo pvs --noheadings --units b --options pv_size "$disk" 2>/dev/null | grep -oE "[0-9]+" | head -n1)
         if [[ -n "$pv_size" ]]; then
             used_bytes=$pv_size
         else
-            # Tenta ver se há algum sistema de arquivos (RAW)
-            local fstype=$(lsblk -no FSTYPE "$disk" | grep -v "^$" | head -n1)
-            [[ -z "$fstype" ]] && fstype=$(sudo blkid -o value -s TYPE "$disk")
-            
-            if [[ -n "$fstype" ]]; then
-                case "$fstype" in
-                    ext*)
-                        local block_count=$(sudo tune2fs -l "$disk" 2>/dev/null | grep "Block count" | awk '{print $3}')
-                        local block_size=$(sudo tune2fs -l "$disk" 2>/dev/null | grep "Block size" | awk '{print $3}')
-                        if [[ -n "$block_count" && -n "$block_size" ]]; then
-                            used_bytes=$((block_count * block_size))
-                        else
-                            used_bytes=$(sudo lsblk -nbno SIZE "$disk" | head -n1)
-                        fi
-                        ;;
-                    xfs)
-                        local agcount=$(sudo xfs_db -c "sb 0" -c "p agcount" "$disk" 2>/dev/null | awk '{print $3}')
-                        local agblocks=$(sudo xfs_db -c "sb 0" -c "p agblocks" "$disk" 2>/dev/null | awk '{print $3}')
-                        local blocksize=$(sudo xfs_db -c "sb 0" -c "p blocksize" "$disk" 2>/dev/null | awk '{print $3}')
-                        if [[ -n "$agcount" && -n "$agblocks" && -n "$blocksize" ]]; then
-                            used_bytes=$((agcount * agblocks * blocksize))
-                        else
-                            used_bytes=$(sudo lsblk -nbno SIZE "$disk" | head -n1)
-                        fi
-                        ;;
-                    *)
-                        used_bytes=$(sudo lsblk -nbno SIZE "$disk" | head -n1)
-                        ;;
-                esac
+            # Fallback agressivo para RAW: Se o tamanho mudou, o usado é o inicial
+            if [[ -n "$initial_size" && "$disk_size_bytes" -gt "$initial_size" ]]; then
+                used_bytes=$initial_size
             else
-                used_bytes=0
+                used_bytes=$disk_size_bytes
             fi
         fi
     fi
 
     local free_bytes=$((disk_size_bytes - used_bytes))
-    
-    # Fallback de segurança: Se o espaço livre calculado for igual ao tamanho total do disco
-    # e já tínhamos um tamanho inicial registrado, usamos a diferença real.
-    if [[ "$used_bytes" -eq 0 && -n "$TAMANHO_INICIAL_DISCO" && "$disk_size_bytes" -gt "$TAMANHO_INICIAL_DISCO" ]]; then
-        log_message "DEBUG" "Usando fallback de tamanho inicial para cálculo de espaço livre."
-        free_bytes=$((disk_size_bytes - TAMANHO_INICIAL_DISCO))
-    fi
-
     log_message "DEBUG" "get_unallocated_space($disk): Total=$disk_size_bytes, Usado=$used_bytes, Livre=$free_bytes"
 
     if [[ "$free_bytes" -lt 104857600 ]]; then
@@ -140,9 +106,9 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " LINUX UNIVERSAL DISK EXPANDER v2.9.5-beta "
+    echo " LINUX UNIVERSAL DISK EXPANDER v2.9.6-beta "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.9.5-beta (TESTE)"
+    echo " Versão: 2.9.6-beta (TESTE)"
     echo " Ambiente: Multi-Cloud / Virtual"
     echo "=================================="
     echo
@@ -225,7 +191,7 @@ while true; do
         TAMANHO_ATUAL_DISCO=$((TAMANHO_ATUAL_DISCO * 512))
         TAMANHO_ATUAL_HUMANO=$(lsblk -dno SIZE "/dev/$DISCO" | head -n1 | xargs)
         
-        ESPACO_OCI=$(get_unallocated_space "$DISCO")
+        ESPACO_OCI=$(get_unallocated_space "$DISCO" "$TAMANHO_INICIAL_DISCO")
 
         if (( $(echo "$ESPACO_OCI > 0" | bc -l) )); then
             echo -e "\n${GREEN}${BOLD}SUCESSO! Espaço novo detectado.${RESET}"
@@ -291,6 +257,11 @@ while true; do
         MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | head -n1 | xargs)
         TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | head -n1 | xargs)
         [[ -z "$TYPE" ]] && TYPE=$(sudo blkid -o value -s TYPE "$ALVO_NOME")
+        # Terceira tentativa de detecção de FSTYPE para RAW
+        if [[ -z "$TYPE" ]]; then
+            if sudo file -s "$ALVO_NOME" | grep -qi "ext4"; then TYPE="ext4";
+            elif sudo file -s "$ALVO_NOME" | grep -qi "xfs"; then TYPE="xfs"; fi
+        fi
         
         if lsblk -no FSTYPE "$ALVO_NOME" | grep -qi "LVM"; then
             HAS_LVM="yes"
