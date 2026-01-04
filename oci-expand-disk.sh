@@ -3,7 +3,7 @@
 # ==============================================================================
 # LINUX UNIVERSAL DISK EXPANDER - MULTI-CLOUD & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 2.9.4-beta (DESENVOLVIMENTO)
+# Versão: 2.9.5-beta (DESENVOLVIMENTO)
 # Última Atualização: 04/01/2026
 #
 # HISTÓRICO DE VERSÕES:
@@ -13,6 +13,7 @@
 # 2.9.2-beta (04/01/2026) - FIX: Melhoria na detecção de espaço para LVM e Partições.
 # 2.9.3-beta (04/01/2026) - FIX: Detecção de FSTYPE e proteção contra expansão vazia.
 # 2.9.4-beta (04/01/2026) - UI: Exibir espaço não alocado no menu de aviso de rescan.
+# 2.9.5-beta (04/01/2026) - FIX: Fallback de cálculo de espaço baseado no tamanho inicial.
 # ==============================================================================
 
 # Configurações de Log
@@ -119,6 +120,14 @@ get_unallocated_space() {
     fi
 
     local free_bytes=$((disk_size_bytes - used_bytes))
+    
+    # Fallback de segurança: Se o espaço livre calculado for igual ao tamanho total do disco
+    # e já tínhamos um tamanho inicial registrado, usamos a diferença real.
+    if [[ "$used_bytes" -eq 0 && -n "$TAMANHO_INICIAL_DISCO" && "$disk_size_bytes" -gt "$TAMANHO_INICIAL_DISCO" ]]; then
+        log_message "DEBUG" "Usando fallback de tamanho inicial para cálculo de espaço livre."
+        free_bytes=$((disk_size_bytes - TAMANHO_INICIAL_DISCO))
+    fi
+
     log_message "DEBUG" "get_unallocated_space($disk): Total=$disk_size_bytes, Usado=$used_bytes, Livre=$free_bytes"
 
     if [[ "$free_bytes" -lt 104857600 ]]; then
@@ -131,9 +140,9 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " LINUX UNIVERSAL DISK EXPANDER v2.9.4-beta "
+    echo " LINUX UNIVERSAL DISK EXPANDER v2.9.5-beta "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.9.4-beta (TESTE)"
+    echo " Versão: 2.9.5-beta (TESTE)"
     echo " Ambiente: Multi-Cloud / Virtual"
     echo "=================================="
     echo
