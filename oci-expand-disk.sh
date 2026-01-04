@@ -3,7 +3,7 @@
 # ==============================================================================
 # LINUX UNIVERSAL DISK EXPANDER - MULTI-CLOUD & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 2.9.8-beta (DESENVOLVIMENTO)
+# Versão: 2.9.9-beta (DESENVOLVIMENTO)
 # Última Atualização: 04/01/2026
 #
 # HISTÓRICO DE VERSÕES:
@@ -17,6 +17,7 @@
 # 2.9.6-beta (04/01/2026) - FIX: Detecção de FSTYPE via file -s e persistência de tamanho inicial.
 # 2.9.7-beta (04/01/2026) - FIX: Refatoração da detecção de FSTYPE/MOUNT e debug visual.
 # 2.9.8-beta (04/01/2026) - FIX: Captura antecipada de tamanho inicial e prioridade para /proc/mounts.
+# 2.9.9-beta (04/01/2026) - FIX: Proteger discos RAW contra sgdisk para evitar corrupção.
 # ==============================================================================
 
 # Configurações de Log
@@ -69,8 +70,11 @@ get_unallocated_space() {
     local disk="/dev/$disk_name"
     local initial_size=$2
     
+    # Só executa sgdisk -e se o disco tiver tabela GPT detectada
     if command -v sgdisk &>/dev/null; then
-        sudo sgdisk -e "$disk" >/dev/null 2>&1
+        if sudo parted -s "$disk" print 2>/dev/null | grep -q "Partition Table: gpt"; then
+            sudo sgdisk -e "$disk" >/dev/null 2>&1
+        fi
     fi
 
     local disk_size_bytes=$(cat "/sys/block/$disk_name/size" 2>/dev/null)
@@ -108,9 +112,9 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " LINUX UNIVERSAL DISK EXPANDER v2.9.8-beta "
+    echo " LINUX UNIVERSAL DISK EXPANDER v2.9.9-beta "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.9.8-beta (TESTE)"
+    echo " Versão: 2.9.9-beta (TESTE)"
     echo " Ambiente: Multi-Cloud / Virtual"
     echo "=================================="
     echo
