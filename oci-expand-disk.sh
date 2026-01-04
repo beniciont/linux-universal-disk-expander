@@ -3,7 +3,7 @@
 # ==============================================================================
 # LINUX UNIVERSAL DISK EXPANDER - MULTI-CLOUD & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 3.0.4 (ESTÁVEL)
+# Versão: 3.0.5 (ESTÁVEL)
 # Última Atualização: 04/01/2026
 #
 # HISTÓRICO DE VERSÕES:
@@ -14,6 +14,7 @@
 # 3.0.2         - FIX: Validação de espaço real e verificação de alteração pós-expansão.
 # 3.0.3         - FIX: Cálculo real de nova capacidade e trava de sanidade bloqueante.
 # 3.0.4         - UI: Melhoria na semântica das mensagens de aviso e fluxo de expansão.
+# 3.0.5         - FIX: Validação bloqueante e infalível de valor personalizado.
 # ==============================================================================
 
 # Configurações de Log
@@ -116,10 +117,10 @@ get_unallocated_space() {
 header() {
     clear
     echo -e "${CYAN}${BOLD}====================================================${RESET}"
-    echo -e "${CYAN}${BOLD}   LINUX UNIVERSAL DISK EXPANDER v3.0.4             ${RESET}"
+    echo -e "${CYAN}${BOLD}   LINUX UNIVERSAL DISK EXPANDER v3.0.5             ${RESET}"
     echo -e "${CYAN}${BOLD}   Multi-Cloud & Virtual Environment Tool           ${RESET}"
     echo -e "${CYAN}${BOLD}====================================================${RESET}"
-    echo -e "   Criado por: Benicio Neto | Versão: ${GREEN}3.0.4${RESET}"
+    echo -e "   Criado por: Benicio Neto | Versão: ${GREEN}3.0.5${RESET}"
     echo -e "${CYAN}${BOLD}====================================================${RESET}"
     echo
 }
@@ -336,24 +337,33 @@ while true; do
         
         EXP_VALUE=""
         if [[ "$OPT_SIZE" == "2" ]]; then
-            read -p "Digite o valor (ex: 10G): " EXP_VALUE
-            if [[ ! "$EXP_VALUE" =~ ^[0-9]+[GgMm]$ ]]; then
-                echo -e "${RED}${ICON_ERROR} Formato inválido!${RESET}"; continue
-            fi
-            
-            # Validação de Sanidade Bloqueante
-            local val_num=$(echo "$EXP_VALUE" | grep -oE "[0-9]+")
-            local val_unit=$(echo "$EXP_VALUE" | grep -oE "[GgMm]")
-            local val_bytes=0
-            [[ ${val_unit,,} == "g" ]] && val_bytes=$((val_num * 1024 * 1024 * 1024))
-            [[ ${val_unit,,} == "m" ]] && val_bytes=$((val_num * 1024 * 1024))
-            
-            local free_bytes_raw=$(echo "$ESPACO_OCI * 1024 * 1024 * 1024" | bc | cut -d. -f1)
-            if [ "$val_bytes" -gt "$free_bytes_raw" ]; then
-                echo -e "${RED}${ICON_ERROR} ERRO: Você solicitou $EXP_VALUE, mas só existem ${ESPACO_OCI}GB livres!${RESET}"
-                continue
-            fi
-            NOVA_CAPACIDADE_HUMANA="${val_num}${val_unit^^} (Aumento)"
+            while true; do
+                read -p "Digite o valor (ex: 10G) ou 'v' para voltar: " EXP_INPUT
+                [[ ${EXP_INPUT,,} == 'v' ]] && continue 2
+                
+                if [[ ! "$EXP_INPUT" =~ ^[0-9]+[GgMm]$ ]]; then
+                    echo -e "${RED}${ICON_ERROR} Formato inválido! Use números seguidos de G ou M (ex: 10G).${RESET}"
+                    continue
+                fi
+                
+                # Validação de Sanidade Bloqueante
+                local val_num=$(echo "$EXP_INPUT" | grep -oE "[0-9]+")
+                local val_unit=$(echo "$EXP_INPUT" | grep -oE "[GgMm]")
+                local val_bytes=0
+                [[ ${val_unit,,} == "g" ]] && val_bytes=$(echo "$val_num * 1024 * 1024 * 1024" | bc)
+                [[ ${val_unit,,} == "m" ]] && val_bytes=$(echo "$val_num * 1024 * 1024" | bc)
+                
+                local free_bytes_raw=$(echo "$ESPACO_OCI * 1024 * 1024 * 1024" | bc | cut -d. -f1)
+                
+                if (( $(echo "$val_bytes > $free_bytes_raw" | bc -l) )); then
+                    echo -e "${RED}${ICON_ERROR} ERRO: Você solicitou $EXP_INPUT, mas só existem ${ESPACO_OCI}GB livres!${RESET}"
+                    continue
+                fi
+                
+                EXP_VALUE="$EXP_INPUT"
+                NOVA_CAPACIDADE_HUMANA="${val_num}${val_unit^^} (Aumento)"
+                break
+            done
         else
             EXP_VALUE=""
             NOVA_CAPACIDADE_HUMANA="${ESPACO_OCI}GB (Aumento)"
