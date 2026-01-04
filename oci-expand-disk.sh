@@ -3,7 +3,7 @@
 # ==============================================================================
 # LINUX UNIVERSAL DISK EXPANDER - MULTI-CLOUD & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 2.9.7-beta (DESENVOLVIMENTO)
+# Versão: 2.9.8-beta (DESENVOLVIMENTO)
 # Última Atualização: 04/01/2026
 #
 # HISTÓRICO DE VERSÕES:
@@ -16,6 +16,7 @@
 # 2.9.5-beta (04/01/2026) - FIX: Fallback de cálculo de espaço baseado no tamanho inicial.
 # 2.9.6-beta (04/01/2026) - FIX: Detecção de FSTYPE via file -s e persistência de tamanho inicial.
 # 2.9.7-beta (04/01/2026) - FIX: Refatoração da detecção de FSTYPE/MOUNT e debug visual.
+# 2.9.8-beta (04/01/2026) - FIX: Captura antecipada de tamanho inicial e prioridade para /proc/mounts.
 # ==============================================================================
 
 # Configurações de Log
@@ -107,9 +108,9 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " LINUX UNIVERSAL DISK EXPANDER v2.9.7-beta "
+    echo " LINUX UNIVERSAL DISK EXPANDER v2.9.8-beta "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.9.7-beta (TESTE)"
+    echo " Versão: 2.9.8-beta (TESTE)"
     echo " Ambiente: Multi-Cloud / Virtual"
     echo "=================================="
     echo
@@ -157,6 +158,7 @@ while true; do
         echo "${RED}ERRO: Disco /dev/$DISCO não encontrado!${RESET}"; sleep 2; continue
     fi
 
+    # Captura o tamanho REAL antes de qualquer rescan
     TAMANHO_INICIAL_DISCO=$(cat "/sys/block/$DISCO/size" 2>/dev/null)
     TAMANHO_INICIAL_DISCO=$((TAMANHO_INICIAL_DISCO * 512))
     TAMANHO_INICIAL_HUMANO=$(lsblk -dno SIZE "/dev/$DISCO" | head -n1 | xargs)
@@ -169,6 +171,9 @@ while true; do
         header
         echo "${YELLOW}PASSO 2: Rescan do Kernel e Barramento${RESET}"
         echo "=========================="
+        
+        # Sincroniza antes do rescan para garantir estado limpo
+        sudo partprobe "/dev/$DISCO" >/dev/null 2>&1
         
         progress 2 "Atualizando Kernel via sysfs (/sys/class/block)..."
         [ -f "/sys/class/block/$DISCO/device/rescan" ] && echo 1 | sudo tee "/sys/class/block/$DISCO/device/rescan" >/dev/null 2>&1
@@ -240,11 +245,13 @@ while true; do
         
         ALVO_NOME="/dev/$PART_ESCOLHIDA"
         PART_NUM=$(echo "$PART_ESCOLHIDA" | grep -oE "[0-9]+$" | tail -1)
-        MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | grep -v "^$" | head -n1 | xargs)
-        TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | grep -v "^$" | head -n1 | xargs)
+        # Prioridade para /proc/mounts (mais confiável que lsblk no Azure)
+        MOUNT=$(grep "^$ALVO_NOME " /proc/mounts | awk '{print $2}' | head -n1)
+        TYPE=$(grep "^$ALVO_NOME " /proc/mounts | awk '{print $3}' | head -n1)
+        
+        [[ -z "$MOUNT" ]] && MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | grep -v "^$" | head -n1 | xargs)
+        [[ -z "$TYPE" ]] && TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | grep -v "^$" | head -n1 | xargs)
         [[ -z "$TYPE" ]] && TYPE=$(sudo blkid -o value -s TYPE "$ALVO_NOME")
-        [[ -z "$MOUNT" ]] && MOUNT=$(grep "^$ALVO_NOME " /proc/mounts | awk '{print $2}')
-        [[ -z "$TYPE" ]] && TYPE=$(grep "^$ALVO_NOME " /proc/mounts | awk '{print $3}')
         
         if lsblk -no FSTYPE "$ALVO_NOME" | grep -qi "LVM"; then
             HAS_LVM="yes"
@@ -257,11 +264,13 @@ while true; do
     else
         MODO="RAW"
         ALVO_NOME="/dev/$DISCO"
-        MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | grep -v "^$" | head -n1 | xargs)
-        TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | grep -v "^$" | head -n1 | xargs)
+        # Prioridade para /proc/mounts (mais confiável que lsblk no Azure)
+        MOUNT=$(grep "^$ALVO_NOME " /proc/mounts | awk '{print $2}' | head -n1)
+        TYPE=$(grep "^$ALVO_NOME " /proc/mounts | awk '{print $3}' | head -n1)
+        
+        [[ -z "$MOUNT" ]] && MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | grep -v "^$" | head -n1 | xargs)
+        [[ -z "$TYPE" ]] && TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | grep -v "^$" | head -n1 | xargs)
         [[ -z "$TYPE" ]] && TYPE=$(sudo blkid -o value -s TYPE "$ALVO_NOME")
-        [[ -z "$MOUNT" ]] && MOUNT=$(grep "^$ALVO_NOME " /proc/mounts | awk '{print $2}')
-        [[ -z "$TYPE" ]] && TYPE=$(grep "^$ALVO_NOME " /proc/mounts | awk '{print $3}')
         
         # Terceira tentativa de detecção de FSTYPE para RAW via file -s
         if [[ -z "$TYPE" ]]; then
