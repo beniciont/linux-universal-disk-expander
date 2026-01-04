@@ -3,7 +3,7 @@
 # ==============================================================================
 # LINUX UNIVERSAL DISK EXPANDER - MULTI-CLOUD & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 3.0.2 (ESTÁVEL)
+# Versão: 3.0.3 (ESTÁVEL)
 # Última Atualização: 04/01/2026
 #
 # HISTÓRICO DE VERSÕES:
@@ -12,6 +12,7 @@
 # 3.0.0         - NEW: Interface profissional, menus numerados, resumo Antes/Depois.
 # 3.0.1         - FIX: Lógica de listagem de discos mais robusta para diferentes ambientes.
 # 3.0.2         - FIX: Validação de espaço real e verificação de alteração pós-expansão.
+# 3.0.3         - FIX: Cálculo real de nova capacidade e trava de sanidade bloqueante.
 # ==============================================================================
 
 # Configurações de Log
@@ -114,10 +115,10 @@ get_unallocated_space() {
 header() {
     clear
     echo -e "${CYAN}${BOLD}====================================================${RESET}"
-    echo -e "${CYAN}${BOLD}   LINUX UNIVERSAL DISK EXPANDER v3.0.2             ${RESET}"
+    echo -e "${CYAN}${BOLD}   LINUX UNIVERSAL DISK EXPANDER v3.0.3             ${RESET}"
     echo -e "${CYAN}${BOLD}   Multi-Cloud & Virtual Environment Tool           ${RESET}"
     echo -e "${CYAN}${BOLD}====================================================${RESET}"
-    echo -e "   Criado por: Benicio Neto | Versão: ${GREEN}3.0.2${RESET}"
+    echo -e "   Criado por: Benicio Neto | Versão: ${GREEN}3.0.3${RESET}"
     echo -e "${CYAN}${BOLD}====================================================${RESET}"
     echo
 }
@@ -318,42 +319,49 @@ while true; do
     fi
 
     # OPÇÕES DE TAMANHO
-    echo -e "\n${YELLOW}${BOLD}OPÇÕES DE EXPANSÃO:${RESET}"
-    echo -e "  ${CYAN}1)${RESET} Usar todo o espaço disponível (100%)"
-    echo -e "  ${CYAN}2)${RESET} Definir um valor específico (ex: 10G, 500M)"
-    read -p "Escolha uma opção: " OPT_SIZE
-    
-    EXP_VALUE=""
-    if [[ "$OPT_SIZE" == "2" ]]; then
-        read -p "Digite o valor (ex: 10G): " EXP_VALUE
-        if [[ ! "$EXP_VALUE" =~ ^[0-9]+[GgMm]$ ]]; then
-            echo -e "${RED}${ICON_ERROR} Formato inválido!${RESET}"; sleep 1; continue
-        fi
+    while true; do
+        echo -e "\n${YELLOW}${BOLD}OPÇÕES DE EXPANSÃO:${RESET}"
+        echo -e "  ${CYAN}1)${RESET} Usar todo o espaço disponível (100%)"
+        echo -e "  ${CYAN}2)${RESET} Definir um valor específico (ex: 10G, 500M)"
+        read -p "Escolha uma opção: " OPT_SIZE
         
-        # Validação de Sanidade
-        local val_num=$(echo "$EXP_VALUE" | grep -oE "[0-9]+")
-        local val_unit=$(echo "$EXP_VALUE" | grep -oE "[GgMm]")
-        local val_bytes=0
-        [[ ${val_unit,,} == "g" ]] && val_bytes=$((val_num * 1024 * 1024 * 1024))
-        [[ ${val_unit,,} == "m" ]] && val_bytes=$((val_num * 1024 * 1024))
-        
-        local free_bytes_raw=$(echo "$ESPACO_OCI * 1024 * 1024 * 1024" | bc | cut -d. -f1)
-        if [ "$val_bytes" -gt "$free_bytes_raw" ] && [ "$free_bytes_raw" -gt 0 ]; then
-            echo -e "${RED}${ICON_ERROR} ERRO: Você solicitou $EXP_VALUE, mas só existem ${ESPACO_OCI}GB livres!${RESET}"
-            pause_nav || continue 2
+        EXP_VALUE=""
+        if [[ "$OPT_SIZE" == "2" ]]; then
+            read -p "Digite o valor (ex: 10G): " EXP_VALUE
+            if [[ ! "$EXP_VALUE" =~ ^[0-9]+[GgMm]$ ]]; then
+                echo -e "${RED}${ICON_ERROR} Formato inválido!${RESET}"; continue
+            fi
+            
+            # Validação de Sanidade Bloqueante
+            local val_num=$(echo "$EXP_VALUE" | grep -oE "[0-9]+")
+            local val_unit=$(echo "$EXP_VALUE" | grep -oE "[GgMm]")
+            local val_bytes=0
+            [[ ${val_unit,,} == "g" ]] && val_bytes=$((val_num * 1024 * 1024 * 1024))
+            [[ ${val_unit,,} == "m" ]] && val_bytes=$((val_num * 1024 * 1024))
+            
+            local free_bytes_raw=$(echo "$ESPACO_OCI * 1024 * 1024 * 1024" | bc | cut -d. -f1)
+            if [ "$val_bytes" -gt "$free_bytes_raw" ]; then
+                echo -e "${RED}${ICON_ERROR} ERRO: Você solicitou $EXP_VALUE, mas só existem ${ESPACO_OCI}GB livres!${RESET}"
+                continue
+            fi
+            NOVA_CAPACIDADE_HUMANA="${val_num}${val_unit^^} (Aumento)"
+        else
+            EXP_VALUE=""
+            NOVA_CAPACIDADE_HUMANA="${ESPACO_OCI}GB (Aumento)"
         fi
-    fi
+        break
+    done
 
     # RESUMO ANTES DE EXECUTAR
     header
     echo -e "${MAGENTA}${BOLD}📋 RESUMO DA OPERAÇÃO${RESET}"
     echo -e "----------------------------------------------------"
-    echo -e "  Disco Físico:  $DISCO"
-    echo -e "  Alvo Final:    $FINAL_TARGET"
+    echo -e "  Disco Físico:   $DISCO"
+    echo -e "  Alvo Final:     $FINAL_TARGET"
     echo -e "  Ponto Montagem: ${CYAN}${MOUNT:-"Não montado"}${RESET}"
-    echo -e "  Tipo FS:       ${CYAN}$TYPE${RESET}"
-    echo -e "  Tamanho Atual: ${YELLOW}$FS_SIZE_BEFORE${RESET}"
-    echo -e "  Nova Capacidade: ${GREEN}${TAMANHO_ATUAL_HUMANO}${RESET}"
+    echo -e "  Tipo FS:        ${CYAN}$TYPE${RESET}"
+    echo -e "  Tamanho Atual:  ${YELLOW}$FS_SIZE_BEFORE${RESET}"
+    echo -e "  Ganho Estimado: ${GREEN}+$NOVA_CAPACIDADE_HUMANA${RESET}"
     echo -e "----------------------------------------------------"
     read -p "Confirmar execução? (s/n): " CONFIRM
     [[ ${CONFIRM,,} != 's' ]] && continue
