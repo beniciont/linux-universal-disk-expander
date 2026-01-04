@@ -3,7 +3,7 @@
 # ==============================================================================
 # LINUX UNIVERSAL DISK EXPANDER - MULTI-CLOUD & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 2.9.2-beta (DESENVOLVIMENTO)
+# Versão: 2.9.3-beta (DESENVOLVIMENTO)
 # Última Atualização: 04/01/2026
 #
 # HISTÓRICO DE VERSÕES:
@@ -11,6 +11,7 @@
 # 2.9.0-beta (03/01/2026) - NEW: Rescan agnóstico (OCI, Azure, AWS, VirtualBox).
 # 2.9.1-beta (04/01/2026) - FIX: Detecção precisa de espaço não alocado em discos RAW.
 # 2.9.2-beta (04/01/2026) - FIX: Melhoria na detecção de espaço para LVM e Partições.
+# 2.9.3-beta (04/01/2026) - FIX: Detecção de FSTYPE e proteção contra expansão vazia.
 # ==============================================================================
 
 # Configurações de Log
@@ -83,23 +84,31 @@ get_unallocated_space() {
         else
             # Tenta ver se há algum sistema de arquivos (RAW)
             local fstype=$(lsblk -no FSTYPE "$disk" | grep -v "^$" | head -n1)
+            [[ -z "$fstype" ]] && fstype=$(sudo blkid -o value -s TYPE "$disk")
+            
             if [[ -n "$fstype" ]]; then
                 case "$fstype" in
                     ext*)
                         local block_count=$(sudo tune2fs -l "$disk" 2>/dev/null | grep "Block count" | awk '{print $3}')
                         local block_size=$(sudo tune2fs -l "$disk" 2>/dev/null | grep "Block size" | awk '{print $3}')
-                        [[ -n "$block_count" && -n "$block_size" ]] && used_bytes=$((block_count * block_size)) || used_bytes=0
+                        if [[ -n "$block_count" && -n "$block_size" ]]; then
+                            used_bytes=$((block_count * block_size))
+                        else
+                            used_bytes=$(sudo lsblk -nbno SIZE "$disk" | head -n1)
+                        fi
                         ;;
                     xfs)
                         local agcount=$(sudo xfs_db -c "sb 0" -c "p agcount" "$disk" 2>/dev/null | awk '{print $3}')
                         local agblocks=$(sudo xfs_db -c "sb 0" -c "p agblocks" "$disk" 2>/dev/null | awk '{print $3}')
                         local blocksize=$(sudo xfs_db -c "sb 0" -c "p blocksize" "$disk" 2>/dev/null | awk '{print $3}')
-                        [[ -n "$agcount" && -n "$agblocks" && -n "$blocksize" ]] && used_bytes=$((agcount * agblocks * blocksize)) || used_bytes=0
+                        if [[ -n "$agcount" && -n "$agblocks" && -n "$blocksize" ]]; then
+                            used_bytes=$((agcount * agblocks * blocksize))
+                        else
+                            used_bytes=$(sudo lsblk -nbno SIZE "$disk" | head -n1)
+                        fi
                         ;;
                     *)
-                        # Se não for EXT ou XFS, tentamos pegar o tamanho do FS via lsblk, mas isso é arriscado em RAW
-                        # Melhor assumir 0 se não conseguirmos precisão, para que o script siga
-                        used_bytes=0
+                        used_bytes=$(sudo lsblk -nbno SIZE "$disk" | head -n1)
                         ;;
                 esac
             else
@@ -121,9 +130,9 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " LINUX UNIVERSAL DISK EXPANDER v2.9.2-beta "
+    echo " LINUX UNIVERSAL DISK EXPANDER v2.9.3-beta "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.9.2-beta (TESTE)"
+    echo " Versão: 2.9.3-beta (TESTE)"
     echo " Ambiente: Multi-Cloud / Virtual"
     echo "=================================="
     echo
@@ -252,8 +261,9 @@ while true; do
         
         ALVO_NOME="/dev/$PART_ESCOLHIDA"
         PART_NUM=$(echo "$PART_ESCOLHIDA" | grep -oE "[0-9]+$" | tail -1)
-        MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | head -n1)
-        TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | head -n1)
+        MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | head -n1 | xargs)
+        TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | head -n1 | xargs)
+        [[ -z "$TYPE" ]] && TYPE=$(sudo blkid -o value -s TYPE "$ALVO_NOME")
         
         if lsblk -no FSTYPE "$ALVO_NOME" | grep -qi "LVM"; then
             HAS_LVM="yes"
@@ -266,8 +276,9 @@ while true; do
     else
         MODO="RAW"
         ALVO_NOME="/dev/$DISCO"
-        MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | head -n1)
-        TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | head -n1)
+        MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | head -n1 | xargs)
+        TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | head -n1 | xargs)
+        [[ -z "$TYPE" ]] && TYPE=$(sudo blkid -o value -s TYPE "$ALVO_NOME")
         
         if lsblk -no FSTYPE "$ALVO_NOME" | grep -qi "LVM"; then
             HAS_LVM="yes"
@@ -340,12 +351,18 @@ while true; do
     fi
 
     if [[ -n "$MOUNT" && "$MOUNT" != "" ]]; then
-        progress 2 "Expandindo Sistema de Arquivos ($TYPE) em $MOUNT..."
-        case "$TYPE" in
-            xfs) sudo xfs_growfs "$MOUNT" >/dev/null 2>&1 ;;
-            ext*) sudo resize2fs "$FINAL_TARGET" >/dev/null 2>&1 ;;
-            btrfs) sudo btrfs filesystem resize max "$MOUNT" >/dev/null 2>&1 ;;
-        esac
+        if [[ -n "$TYPE" ]]; then
+            progress 2 "Expandindo Sistema de Arquivos ($TYPE) em $MOUNT..."
+            case "$TYPE" in
+                xfs) sudo xfs_growfs "$MOUNT" >/dev/null 2>&1 ;;
+                ext*) sudo resize2fs "$FINAL_TARGET" >/dev/null 2>&1 ;;
+                btrfs) sudo btrfs filesystem resize max "$MOUNT" >/dev/null 2>&1 ;;
+                *) log_message "WARN" "Tipo de FS ($TYPE) não suportado para expansão automática." ;;
+            esac
+        else
+            echo "${RED}ERRO: Não foi possível detectar o tipo de sistema de arquivos em $MOUNT!${RESET}"
+            log_message "ERROR" "FSTYPE não detectado para $FINAL_TARGET"
+        fi
     fi
 
     if [[ -n "$MOUNT" && "$MOUNT" != "" ]]; then
