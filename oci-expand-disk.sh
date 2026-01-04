@@ -3,7 +3,7 @@
 # ==============================================================================
 # LINUX UNIVERSAL DISK EXPANDER - MULTI-CLOUD & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 3.0.6 (ESTÁVEL)
+# Versão: 3.0.7 (ESTÁVEL)
 # Última Atualização: 04/01/2026
 #
 # HISTÓRICO DE VERSÕES:
@@ -16,6 +16,7 @@
 # 3.0.4         - UI: Melhoria na semântica das mensagens de aviso e fluxo de expansão.
 # 3.0.5         - FIX: Validação bloqueante e infalível de valor personalizado.
 # 3.0.6         - FIX: Bloqueio de fluxo quando não há espaço disponível.
+# 3.0.7         - NEW: Suporte para expansão de LV usando espaço livre no VG (VG Free).
 # ==============================================================================
 
 # Configurações de Log
@@ -95,7 +96,17 @@ get_unallocated_space() {
     else
         local pv_size=$(sudo pvs --noheadings --units b --options pv_size "$disk" 2>/dev/null | grep -oE "[0-9]+" | head -n1)
         if [[ -n "$pv_size" ]]; then
-            used_bytes=$pv_size
+            local vg_name=$(sudo pvs --noheadings -o vg_name "$disk" 2>/dev/null | xargs)
+            local vg_free=0
+            if [[ -n "$vg_name" ]]; then
+                vg_free=$(sudo vgs --units b --noheadings -o vg_free "$vg_name" 2>/dev/null | grep -oE "[0-9]+" | head -n1)
+            fi
+            
+            if [ "$disk_size_bytes" -gt "$pv_size" ]; then
+                used_bytes=$pv_size
+            else
+                used_bytes=$((pv_size - vg_free))
+            fi
         else
             if [[ -n "$initial_size" && "$disk_size_bytes" -gt "$initial_size" ]]; then
                 used_bytes=$initial_size
@@ -118,10 +129,10 @@ get_unallocated_space() {
 header() {
     clear
     echo -e "${CYAN}${BOLD}====================================================${RESET}"
-    echo -e "${CYAN}${BOLD}   LINUX UNIVERSAL DISK EXPANDER v3.0.6             ${RESET}"
+    echo -e "${CYAN}${BOLD}   LINUX UNIVERSAL DISK EXPANDER v3.0.7             ${RESET}"
     echo -e "${CYAN}${BOLD}   Multi-Cloud & Virtual Environment Tool           ${RESET}"
     echo -e "${CYAN}${BOLD}====================================================${RESET}"
-    echo -e "   Criado por: Benicio Neto | Versão: ${GREEN}3.0.6${RESET}"
+    echo -e "   Criado por: Benicio Neto | Versão: ${GREEN}3.0.7${RESET}"
     echo -e "${CYAN}${BOLD}====================================================${RESET}"
     echo
 }
