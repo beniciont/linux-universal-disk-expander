@@ -3,12 +3,13 @@
 # ==============================================================================
 # LINUX UNIVERSAL DISK EXPANDER - MULTI-CLOUD & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 2.9.0-beta (DESENVOLVIMENTO)
-# Última Atualização: 03/01/2026
+# Versão: 2.9.1-beta (DESENVOLVIMENTO)
+# Última Atualização: 04/01/2026
 #
 # HISTÓRICO DE VERSÕES:
 # 1.0.0 a 2.8.0 - Evolução focada em OCI.
 # 2.9.0-beta (03/01/2026) - NEW: Rescan agnóstico (OCI, Azure, AWS, VirtualBox).
+# 2.9.1-beta (04/01/2026) - FIX: Detecção precisa de espaço não alocado em discos RAW.
 # ==============================================================================
 
 # Configurações de Log
@@ -81,10 +82,37 @@ get_unallocated_space() {
             if [[ -n "$pv_size" ]]; then
                 used_bytes=$pv_size
             else
-                if lsblk -no FSTYPE "$disk" | grep -q "."; then
-                    used_bytes=$disk_size_bytes
-                else
-                    used_bytes=0
+                # Para discos RAW, tentamos obter o tamanho do sistema de arquivos
+                local fs_size=$(sudo lsblk -nbno SIZE "$disk" | head -n1)
+                # Se houver um sistema de arquivos, o tamanho 'usado' é o tamanho do FS antes do rescan
+                # No entanto, como o lsblk já pode reportar o tamanho do disco após o rescan,
+                # usamos o tune2fs para EXT ou xfs_path para XFS se possível.
+                local fstype=$(lsblk -no FSTYPE "$disk" | grep -v "^$" | head -n1)
+                case "$fstype" in
+                    ext*)
+                        local block_count=$(sudo tune2fs -l "$disk" 2>/dev/null | grep "Block count" | awk '{print $3}')
+                        local block_size=$(sudo tune2fs -l "$disk" 2>/dev/null | grep "Block size" | awk '{print $3}')
+                        [[ -n "$block_count" && -n "$block_size" ]] && used_bytes=$((block_count * block_size)) || used_bytes=$fs_size
+                        ;;
+                    xfs)
+                        # Para XFS, usamos xfs_db para obter o tamanho real do FS em blocos
+                        local agcount=$(sudo xfs_db -c "sb 0" -c "p agcount" "$disk" 2>/dev/null | awk '{print $3}')
+                        local agblocks=$(sudo xfs_db -c "sb 0" -c "p agblocks" "$disk" 2>/dev/null | awk '{print $3}')
+                        local blocksize=$(sudo xfs_db -c "sb 0" -c "p blocksize" "$disk" 2>/dev/null | awk '{print $3}')
+                        [[ -n "$agcount" && -n "$agblocks" && -n "$blocksize" ]] && used_bytes=$((agcount * agblocks * blocksize)) || used_bytes=$fs_size
+                        ;;
+                    *)
+                        used_bytes=$fs_size
+                        ;;
+                esac
+                
+                # Se o used_bytes ainda for igual ao disk_size_bytes, significa que o FS já ocupa tudo ou não detectamos
+                # Mas para evitar o erro de mostrar o disco todo como novo, se detectarmos FSTYPE, assumimos que o 
+                # espaço livre é a diferença entre o disco físico e o que o kernel reporta como tamanho do bloco do FS.
+                if [[ "$used_bytes" -eq "$disk_size_bytes" ]]; then
+                    # Fallback: se não conseguimos determinar o tamanho do FS, mas ele existe, 
+                    # o usuário verá 0 ou o valor total se o rescan falhou.
+                    log_message "DEBUG" "Não foi possível diferenciar tamanho do FS do tamanho do disco para RAW."
                 fi
             fi
         fi
@@ -103,9 +131,9 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " LINUX UNIVERSAL DISK EXPANDER v2.9.0-beta "
+    echo " LINUX UNIVERSAL DISK EXPANDER v2.9.1-beta "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.9.0-beta (TESTE)"
+    echo " Versão: 2.9.1-beta (TESTE)"
     echo " Ambiente: Multi-Cloud / Virtual"
     echo "=================================="
     echo
