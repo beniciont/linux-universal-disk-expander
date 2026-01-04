@@ -3,7 +3,7 @@
 # ==============================================================================
 # LINUX UNIVERSAL DISK EXPANDER - MULTI-CLOUD & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 3.0.3 (ESTÁVEL)
+# Versão: 3.0.4 (ESTÁVEL)
 # Última Atualização: 04/01/2026
 #
 # HISTÓRICO DE VERSÕES:
@@ -13,6 +13,7 @@
 # 3.0.1         - FIX: Lógica de listagem de discos mais robusta para diferentes ambientes.
 # 3.0.2         - FIX: Validação de espaço real e verificação de alteração pós-expansão.
 # 3.0.3         - FIX: Cálculo real de nova capacidade e trava de sanidade bloqueante.
+# 3.0.4         - UI: Melhoria na semântica das mensagens de aviso e fluxo de expansão.
 # ==============================================================================
 
 # Configurações de Log
@@ -115,10 +116,10 @@ get_unallocated_space() {
 header() {
     clear
     echo -e "${CYAN}${BOLD}====================================================${RESET}"
-    echo -e "${CYAN}${BOLD}   LINUX UNIVERSAL DISK EXPANDER v3.0.3             ${RESET}"
+    echo -e "${CYAN}${BOLD}   LINUX UNIVERSAL DISK EXPANDER v3.0.4             ${RESET}"
     echo -e "${CYAN}${BOLD}   Multi-Cloud & Virtual Environment Tool           ${RESET}"
     echo -e "${CYAN}${BOLD}====================================================${RESET}"
-    echo -e "   Criado por: Benicio Neto | Versão: ${GREEN}3.0.3${RESET}"
+    echo -e "   Criado por: Benicio Neto | Versão: ${GREEN}3.0.4${RESET}"
     echo -e "${CYAN}${BOLD}====================================================${RESET}"
     echo
 }
@@ -227,12 +228,20 @@ while true; do
             echo -e "  Espaço Livre:  ${GREEN}${BOLD}${ESPACO_OCI} GB${RESET}"
             pause_nav && break || continue 2
         else
-            echo -e "\n${YELLOW}${ICON_WARN} AVISO: Nenhum espaço novo detectado.${RESET}"
-            echo -e "  Tamanho Atual: $TAMANHO_ATUAL_HUMANO"
-            echo -e "  Espaço Livre Calculado: ${ESPACO_OCI} GB"
+            if (( $(echo "$ESPACO_OCI == 0" | bc -l) )); then
+                echo -e "\n${RED}${ICON_ERROR} AVISO: Nenhum espaço disponível para expansão.${RESET}"
+            else
+                echo -e "\n${YELLOW}${ICON_INFO} INFO: O rescan não detectou mudanças recentes.${RESET}"
+                echo -e "  No entanto, você ainda possui ${BOLD}${ESPACO_OCI} GB${RESET} disponíveis."
+            fi
+            echo -e "  Tamanho Atual do Disco: $TAMANHO_ATUAL_HUMANO"
             echo -e "----------------------------------------------------"
             echo -e "  ${CYAN}1)${RESET} Tentar Rescan novamente"
-            echo -e "  ${CYAN}2)${RESET} Forçar expansão (Seguir mesmo assim)"
+            if (( $(echo "$ESPACO_OCI > 0" | bc -l) )); then
+                echo -e "  ${CYAN}2)${RESET} Prosseguir para Expansão"
+            else
+                echo -e "  ${CYAN}2)${RESET} Forçar verificação (Avançar mesmo assim)"
+            fi
             echo -e "  ${CYAN}v)${RESET} Voltar ao Passo 1"
             echo -e "----------------------------------------------------"
             read -p "Opção: " OPT
