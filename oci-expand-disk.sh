@@ -3,35 +3,39 @@
 # ==============================================================================
 # LINUX UNIVERSAL DISK EXPANDER - MULTI-CLOUD & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 2.9.9-beta (DESENVOLVIMENTO)
+# Versão: 3.0.2 (ESTÁVEL)
 # Última Atualização: 04/01/2026
 #
 # HISTÓRICO DE VERSÕES:
 # 1.0.0 a 2.8.0 - Evolução focada em OCI.
-# 2.9.0-beta (03/01/2026) - NEW: Rescan agnóstico (OCI, Azure, AWS, VirtualBox).
-# 2.9.1-beta (04/01/2026) - FIX: Detecção precisa de espaço não alocado em discos RAW.
-# 2.9.2-beta (04/01/2026) - FIX: Melhoria na detecção de espaço para LVM e Partições.
-# 2.9.3-beta (04/01/2026) - FIX: Detecção de FSTYPE e proteção contra expansão vazia.
-# 2.9.4-beta (04/01/2026) - UI: Exibir espaço não alocado no menu de aviso de rescan.
-# 2.9.5-beta (04/01/2026) - FIX: Fallback de cálculo de espaço baseado no tamanho inicial.
-# 2.9.6-beta (04/01/2026) - FIX: Detecção de FSTYPE via file -s e persistência de tamanho inicial.
-# 2.9.7-beta (04/01/2026) - FIX: Refatoração da detecção de FSTYPE/MOUNT e debug visual.
-# 2.9.8-beta (04/01/2026) - FIX: Captura antecipada de tamanho inicial e prioridade para /proc/mounts.
-# 2.9.9-beta (04/01/2026) - FIX: Proteger discos RAW contra sgdisk para evitar corrupção.
+# 2.9.x-beta    - Rescan agnóstico, correções de RAW e LVM no Azure.
+# 3.0.0         - NEW: Interface profissional, menus numerados, resumo Antes/Depois.
+# 3.0.1         - FIX: Lógica de listagem de discos mais robusta para diferentes ambientes.
+# 3.0.2         - FIX: Validação de espaço real e verificação de alteração pós-expansão.
 # ==============================================================================
 
 # Configurações de Log
 LOG_FILE="/var/log/oci-expand.log"
 USER_EXEC=$(whoami)
 
-# Cores seguras com tput
+# Cores e Estilos
 RED=$(tput setaf 1 2>/dev/null || true)
 GREEN=$(tput setaf 2 2>/dev/null || true)
 YELLOW=$(tput setaf 3 2>/dev/null || true)
 BLUE=$(tput setaf 4 2>/dev/null || true)
 CYAN=$(tput setaf 6 2>/dev/null || true)
+MAGENTA=$(tput setaf 5 2>/dev/null || true)
 BOLD=$(tput bold 2>/dev/null || true)
 RESET=$(tput sgr0 2>/dev/null || true)
+
+# Ícones
+ICON_DISK="📦"
+ICON_PART="📂"
+ICON_LVM="🗄️"
+ICON_INFO="ℹ️"
+ICON_SUCCESS="✅"
+ICON_WARN="⚠️"
+ICON_ERROR="❌"
 
 # Função de Log
 log_message() {
@@ -50,7 +54,7 @@ log_message() {
 
 # Função para instalar dependências
 check_dependencies() {
-    local deps=("gdisk" "util-linux" "parted" "xfsprogs" "e2fsprogs" "bc")
+    local deps=("gdisk" "util-linux" "parted" "xfsprogs" "e2fsprogs" "bc" "file")
     for dep in "${deps[@]}"; do
         if ! command -v "$dep" &>/dev/null && [[ "$dep" != "util-linux" ]]; then
             log_message "INFO" "$dep não encontrado. Tentando instalar..."
@@ -70,7 +74,6 @@ get_unallocated_space() {
     local disk="/dev/$disk_name"
     local initial_size=$2
     
-    # Só executa sgdisk -e se o disco tiver tabela GPT detectada
     if command -v sgdisk &>/dev/null; then
         if sudo parted -s "$disk" print 2>/dev/null | grep -q "Partition Table: gpt"; then
             sudo sgdisk -e "$disk" >/dev/null 2>&1
@@ -90,7 +93,6 @@ get_unallocated_space() {
         if [[ -n "$pv_size" ]]; then
             used_bytes=$pv_size
         else
-            # Fallback agressivo para RAW: Se o tamanho mudou, o usado é o inicial
             if [[ -n "$initial_size" && "$disk_size_bytes" -gt "$initial_size" ]]; then
                 used_bytes=$initial_size
             else
@@ -111,19 +113,19 @@ get_unallocated_space() {
 
 header() {
     clear
-    echo "=================================="
-    echo " LINUX UNIVERSAL DISK EXPANDER v2.9.9-beta "
-    echo " Criado por: Benicio Neto"
-    echo " Versão: 2.9.9-beta (TESTE)"
-    echo " Ambiente: Multi-Cloud / Virtual"
-    echo "=================================="
+    echo -e "${CYAN}${BOLD}====================================================${RESET}"
+    echo -e "${CYAN}${BOLD}   LINUX UNIVERSAL DISK EXPANDER v3.0.2             ${RESET}"
+    echo -e "${CYAN}${BOLD}   Multi-Cloud & Virtual Environment Tool           ${RESET}"
+    echo -e "${CYAN}${BOLD}====================================================${RESET}"
+    echo -e "   Criado por: Benicio Neto | Versão: ${GREEN}3.0.2${RESET}"
+    echo -e "${CYAN}${BOLD}====================================================${RESET}"
     echo
 }
 
 pause_nav() {
     echo
-    echo -n "${YELLOW}[ENTER] continuar (v=voltar / q=sair): ${RESET}"
-    read resp
+    echo -e "${YELLOW}${BOLD}[ENTER]${RESET} continuar | ${YELLOW}${BOLD}[V]${RESET} voltar | ${YELLOW}${BOLD}[Q]${RESET} sair"
+    read -p "Opção: " resp
     case ${resp,,} in
         'q') exit 0 ;;
         'v') return 1 ;;
@@ -133,70 +135,85 @@ pause_nav() {
 
 progress() {
     local steps=$1 msg=$2
-    echo "  > $msg"
+    echo -e "  ${BLUE}»${RESET} $msg"
     log_message "EXEC" "$msg"
     for ((i=1; i<=steps; i++)); do
-        printf "    [%3d%%] " $((i*100/steps))
+        printf "    [ "
+        for ((j=0; j<i; j++)); do printf "■"; done
+        for ((j=i; j<steps; j++)); do printf " "; done
+        printf " ] %3d%%" $((i*100/steps))
         sleep 0.1
-        printf "\r               \r"
+        printf "\r"
     done
-    echo "  ${GREEN}[OK]${RESET} $msg"
+    echo -e "\n  ${GREEN}${ICON_SUCCESS}${RESET} $msg concluído."
 }
 
 # Início do Script
-log_message "START" "Script Universal v2.9.7-beta iniciado."
+log_message "START" "Script Universal v3.0.2 iniciado."
 check_dependencies
 
 while true; do
-    # PASSO 1: ESCOLHA DO DISCO
     header
-    echo "${YELLOW}PASSO 1: Escolha o disco físico${RESET}"
-    echo "=========================="
-    lsblk -d -n -o NAME,SIZE,TYPE,MODEL | grep "disk"
-    echo "=========================="
-    echo -n "${BLUE}Digite o nome do disco (ex: sda, sdb): ${RESET}"
-    read DISCO
+    echo -e "${BOLD}${ICON_DISK} PASSO 1: Seleção de Disco Físico${RESET}"
+    echo -e "----------------------------------------------------"
     
-    [[ ${DISCO,,} == 'q' ]] && exit 0
-    if [[ -z "$DISCO" || ! -b "/dev/$DISCO" ]]; then
-        echo "${RED}ERRO: Disco /dev/$DISCO não encontrado!${RESET}"; sleep 2; continue
+    DISK_LIST=()
+    while read -r line; do
+        [[ -n "$line" ]] && DISK_LIST+=("$line")
+    done < <(lsblk -d -n -o NAME,SIZE,MODEL,TYPE | grep -i "disk" | awk '{$NF=""; print $0}' | xargs -I{} echo {})
+    
+    if [ ${#DISK_LIST[@]} -eq 0 ]; then
+        for d in /sys/block/sd* /sys/block/vd* /sys/block/nvme*; do
+            if [ -e "$d" ]; then
+                d_name=$(basename "$d")
+                d_size=$(lsblk -dno SIZE "/dev/$d_name" 2>/dev/null)
+                [[ -n "$d_size" ]] && DISK_LIST+=("$d_name $d_size")
+            fi
+        done
     fi
 
-    # Captura o tamanho REAL antes de qualquer rescan
+    for i in "${!DISK_LIST[@]}"; do
+        echo -e "  ${CYAN}$((i+1)))${RESET} ${DISK_LIST[$i]}"
+    done
+    echo -e "  ${CYAN}q)${RESET} Sair do script"
+    echo -e "----------------------------------------------------"
+    read -p "Escolha o número do disco: " DISK_OPT
+
+    [[ ${DISK_OPT,,} == 'q' ]] && exit 0
+    
+    if [[ ! "$DISK_OPT" =~ ^[0-9]+$ ]] || [ "$DISK_OPT" -lt 1 ] || [ "$DISK_OPT" -gt "${#DISK_LIST[@]}" ]; then
+        echo -e "${RED}${ICON_ERROR} Opção inválida!${RESET}"; sleep 1; continue
+    fi
+
+    DISCO=$(echo "${DISK_LIST[$((DISK_OPT-1))]}" | awk '{print $1}')
+    
     TAMANHO_INICIAL_DISCO=$(cat "/sys/block/$DISCO/size" 2>/dev/null)
     TAMANHO_INICIAL_DISCO=$((TAMANHO_INICIAL_DISCO * 512))
     TAMANHO_INICIAL_HUMANO=$(lsblk -dno SIZE "/dev/$DISCO" | head -n1 | xargs)
     
-    echo -e "\n${GREEN}DISCO SELECIONADO: /dev/$DISCO ($TAMANHO_INICIAL_HUMANO)${RESET}"
+    echo -e "\n${GREEN}${ICON_SUCCESS} Selecionado: /dev/$DISCO ($TAMANHO_INICIAL_HUMANO)${RESET}"
     pause_nav || continue
 
-    # PASSO 2: RESCAN AGNOSTICO
+    # PASSO 2: RESCAN
     while true; do
         header
-        echo "${YELLOW}PASSO 2: Rescan do Kernel e Barramento${RESET}"
-        echo "=========================="
+        echo -e "${BOLD}${ICON_INFO} PASSO 2: Rescan de Barramento e Kernel${RESET}"
+        echo -e "----------------------------------------------------"
         
-        # Sincroniza antes do rescan para garantir estado limpo
         sudo partprobe "/dev/$DISCO" >/dev/null 2>&1
-        
-        progress 2 "Atualizando Kernel via sysfs (/sys/class/block)..."
+        progress 5 "Atualizando Kernel via sysfs..."
         [ -f "/sys/class/block/$DISCO/device/rescan" ] && echo 1 | sudo tee "/sys/class/block/$DISCO/device/rescan" >/dev/null 2>&1
         
-        # Rescan de barramento SCSI genérico
         if [ -d "/sys/class/scsi_host" ]; then
-            progress 2 "Rescan de barramento SCSI genérico..."
+            progress 5 "Rescan de barramento SCSI..."
             for host in /sys/class/scsi_host/host*; do echo "- - -" | sudo tee "$host/scan" >/dev/null 2>&1; done
         fi
 
-        # Rescan específico para OCI (iSCSI)
         if command -v iscsiadm &>/dev/null; then
-            progress 2 "Detectado iSCSI. Executando rescan específico..."
+            progress 5 "Rescan de sessões iSCSI..."
             sudo iscsiadm -m node -R >/dev/null 2>&1 && sudo iscsiadm -m session -R >/dev/null 2>&1
         fi
 
-        progress 2 "Sincronizando tabela de partições (partprobe)..."
-        sudo partprobe "/dev/$DISCO" >/dev/null 2>&1
-        
         TAMANHO_ATUAL_DISCO=$(cat "/sys/block/$DISCO/size" 2>/dev/null)
         TAMANHO_ATUAL_DISCO=$((TAMANHO_ATUAL_DISCO * 512))
         TAMANHO_ATUAL_HUMANO=$(lsblk -dno SIZE "/dev/$DISCO" | head -n1 | xargs)
@@ -204,19 +221,19 @@ while true; do
         ESPACO_OCI=$(get_unallocated_space "$DISCO" "$TAMANHO_INICIAL_DISCO")
 
         if (( $(echo "$ESPACO_OCI > 0" | bc -l) )); then
-            echo -e "\n${GREEN}${BOLD}SUCESSO! Espaço novo detectado.${RESET}"
-            echo "Tamanho Atual: $TAMANHO_ATUAL_HUMANO"
-            echo "Espaço não alocado: ${ESPACO_OCI} GB"
+            echo -e "\n${GREEN}${BOLD}${ICON_SUCCESS} SUCESSO! Espaço novo detectado.${RESET}"
+            echo -e "  Tamanho Atual: ${BOLD}$TAMANHO_ATUAL_HUMANO${RESET}"
+            echo -e "  Espaço Livre:  ${GREEN}${BOLD}${ESPACO_OCI} GB${RESET}"
             pause_nav && break || continue 2
         else
-            echo -e "\n${RED}AVISO: Nenhum espaço novo detectado.${RESET}"
-            echo "Tamanho Atual: $TAMANHO_ATUAL_HUMANO"
-            echo "Espaço não alocado calculado: ${ESPACO_OCI} GB"
-            echo "--------------------------------------------------"
-            echo "1) Tentar Rescan novamente"
-            echo "2) Seguir mesmo assim (Forçar)"
-            echo "v) Voltar ao Passo 1"
-            echo "--------------------------------------------------"
+            echo -e "\n${YELLOW}${ICON_WARN} AVISO: Nenhum espaço novo detectado.${RESET}"
+            echo -e "  Tamanho Atual: $TAMANHO_ATUAL_HUMANO"
+            echo -e "  Espaço Livre Calculado: ${ESPACO_OCI} GB"
+            echo -e "----------------------------------------------------"
+            echo -e "  ${CYAN}1)${RESET} Tentar Rescan novamente"
+            echo -e "  ${CYAN}2)${RESET} Forçar expansão (Seguir mesmo assim)"
+            echo -e "  ${CYAN}v)${RESET} Voltar ao Passo 1"
+            echo -e "----------------------------------------------------"
             read -p "Opção: " OPT
             case $OPT in
                 1) continue ;;
@@ -227,32 +244,34 @@ while true; do
         fi
     done
 
-    # PASSO 3: DETECÇÃO UNIVERSAL
+    # PASSO 3: ESTRUTURA
     header
-    echo "${CYAN}PASSO 3: Estrutura Detectada${RESET}"
-    echo "======================"
+    echo -e "${BOLD}${ICON_PART} PASSO 3: Detecção de Estrutura e Alvo${RESET}"
+    echo -e "----------------------------------------------------"
     lsblk "/dev/$DISCO" -o NAME,FSTYPE,SIZE,MOUNTPOINT,TYPE
-    echo "======================"
+    echo -e "----------------------------------------------------"
 
     HAS_PART=$(lsblk -ln -o TYPE "/dev/$DISCO" | grep -q "part" && echo "yes" || echo "no")
     
     if [[ "$HAS_PART" == "yes" ]]; then
         MODO="PART"
-        PARTS_AVAILABLE=$(lsblk -ln -o NAME,TYPE "/dev/$DISCO" | grep "part" | awk '{print $1}')
-        echo -e "\n${BLUE}Partições encontradas: $PARTS_AVAILABLE${RESET}"
-        echo -n "Digite o nome da partição que deseja expandir (ex: sda3): "
-        read PART_ESCOLHIDA
+        mapfile -t PART_LIST < <(lsblk -ln -o NAME,SIZE,TYPE "/dev/$DISCO" | grep "part")
+        echo -e "${BLUE}Partições encontradas:${RESET}"
+        for i in "${!PART_LIST[@]}"; do
+            echo -e "  ${CYAN}$((i+1)))${RESET} ${PART_LIST[$i]}"
+        done
+        read -p "Escolha o número da partição: " PART_OPT
         
-        if [[ -z "$PART_ESCOLHIDA" || ! -b "/dev/$PART_ESCOLHIDA" ]]; then
-            echo "${RED}ERRO: Partição inválida!${RESET}"; sleep 2; continue
+        if [[ ! "$PART_OPT" =~ ^[0-9]+$ ]] || [ "$PART_OPT" -lt 1 ] || [ "$PART_OPT" -gt "${#PART_LIST[@]}" ]; then
+            echo -e "${RED}${ICON_ERROR} Opção inválida!${RESET}"; sleep 1; continue
         fi
         
+        PART_ESCOLHIDA=$(echo "${PART_LIST[$((PART_OPT-1))]}" | awk '{print $1}')
         ALVO_NOME="/dev/$PART_ESCOLHIDA"
         PART_NUM=$(echo "$PART_ESCOLHIDA" | grep -oE "[0-9]+$" | tail -1)
-        # Prioridade para /proc/mounts (mais confiável que lsblk no Azure)
+        
         MOUNT=$(grep "^$ALVO_NOME " /proc/mounts | awk '{print $2}' | head -n1)
         TYPE=$(grep "^$ALVO_NOME " /proc/mounts | awk '{print $3}' | head -n1)
-        
         [[ -z "$MOUNT" ]] && MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | grep -v "^$" | head -n1 | xargs)
         [[ -z "$TYPE" ]] && TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | grep -v "^$" | head -n1 | xargs)
         [[ -z "$TYPE" ]] && TYPE=$(sudo blkid -o value -s TYPE "$ALVO_NOME")
@@ -268,15 +287,12 @@ while true; do
     else
         MODO="RAW"
         ALVO_NOME="/dev/$DISCO"
-        # Prioridade para /proc/mounts (mais confiável que lsblk no Azure)
         MOUNT=$(grep "^$ALVO_NOME " /proc/mounts | awk '{print $2}' | head -n1)
         TYPE=$(grep "^$ALVO_NOME " /proc/mounts | awk '{print $3}' | head -n1)
-        
         [[ -z "$MOUNT" ]] && MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | grep -v "^$" | head -n1 | xargs)
         [[ -z "$TYPE" ]] && TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | grep -v "^$" | head -n1 | xargs)
         [[ -z "$TYPE" ]] && TYPE=$(sudo blkid -o value -s TYPE "$ALVO_NOME")
         
-        # Terceira tentativa de detecção de FSTYPE para RAW via file -s
         if [[ -z "$TYPE" ]]; then
             local file_out=$(sudo file -s "$ALVO_NOME")
             if echo "$file_out" | grep -qi "ext4"; then TYPE="ext4";
@@ -293,43 +309,62 @@ while true; do
         fi
     fi
     
-    echo -e "${CYAN}DEBUG: Alvo=$ALVO_NOME | Mount=$MOUNT | Type=$TYPE${RESET}"
-
     FINAL_TARGET="${ALVO_LVM:-$ALVO_NOME}"
     
     if [[ -n "$MOUNT" && "$MOUNT" != "" ]]; then
-        FS_SIZE_BEFORE=$(df -B1 "$MOUNT" | tail -n1 | awk '{print $2}')
+        FS_SIZE_BEFORE=$(df -h "$MOUNT" | tail -n1 | awk '{print $2}')
     else
-        FS_SIZE_BEFORE=$(lsblk -bdno SIZE "$FINAL_TARGET" | head -n1)
+        FS_SIZE_BEFORE=$(lsblk -dno SIZE "$FINAL_TARGET" | head -n1)
     fi
 
-    # ESCOLHA DO TAMANHO DA EXPANSAO
-    echo -e "\n${YELLOW}OPÇÕES DE EXPANSÃO:${RESET}"
-    echo "1) Usar todo o espaço disponível (100%)"
-    echo "2) Definir um valor específico (ex: 10G, 500M)"
-    echo -n "Escolha uma opção: "
-    read OPT_SIZE
+    # OPÇÕES DE TAMANHO
+    echo -e "\n${YELLOW}${BOLD}OPÇÕES DE EXPANSÃO:${RESET}"
+    echo -e "  ${CYAN}1)${RESET} Usar todo o espaço disponível (100%)"
+    echo -e "  ${CYAN}2)${RESET} Definir um valor específico (ex: 10G, 500M)"
+    read -p "Escolha uma opção: " OPT_SIZE
     
     EXP_VALUE=""
     if [[ "$OPT_SIZE" == "2" ]]; then
-        echo -n "Digite o valor desejado (ex: 10G, 500M): "
-        read EXP_VALUE
+        read -p "Digite o valor (ex: 10G): " EXP_VALUE
         if [[ ! "$EXP_VALUE" =~ ^[0-9]+[GgMm]$ ]]; then
-            echo "${RED}ERRO: Formato inválido! Use algo como 10G ou 500M.${RESET}"; sleep 2; continue
+            echo -e "${RED}${ICON_ERROR} Formato inválido!${RESET}"; sleep 1; continue
+        fi
+        
+        # Validação de Sanidade
+        local val_num=$(echo "$EXP_VALUE" | grep -oE "[0-9]+")
+        local val_unit=$(echo "$EXP_VALUE" | grep -oE "[GgMm]")
+        local val_bytes=0
+        [[ ${val_unit,,} == "g" ]] && val_bytes=$((val_num * 1024 * 1024 * 1024))
+        [[ ${val_unit,,} == "m" ]] && val_bytes=$((val_num * 1024 * 1024))
+        
+        local free_bytes_raw=$(echo "$ESPACO_OCI * 1024 * 1024 * 1024" | bc | cut -d. -f1)
+        if [ "$val_bytes" -gt "$free_bytes_raw" ] && [ "$free_bytes_raw" -gt 0 ]; then
+            echo -e "${RED}${ICON_ERROR} ERRO: Você solicitou $EXP_VALUE, mas só existem ${ESPACO_OCI}GB livres!${RESET}"
+            pause_nav || continue 2
         fi
     fi
 
-    echo -e "\n${BLUE}Confirmar expansão de $FINAL_TARGET? (s/n)${RESET}"
-    read CONFIRM
+    # RESUMO ANTES DE EXECUTAR
+    header
+    echo -e "${MAGENTA}${BOLD}📋 RESUMO DA OPERAÇÃO${RESET}"
+    echo -e "----------------------------------------------------"
+    echo -e "  Disco Físico:  $DISCO"
+    echo -e "  Alvo Final:    $FINAL_TARGET"
+    echo -e "  Ponto Montagem: ${CYAN}${MOUNT:-"Não montado"}${RESET}"
+    echo -e "  Tipo FS:       ${CYAN}$TYPE${RESET}"
+    echo -e "  Tamanho Atual: ${YELLOW}$FS_SIZE_BEFORE${RESET}"
+    echo -e "  Nova Capacidade: ${GREEN}${TAMANHO_ATUAL_HUMANO}${RESET}"
+    echo -e "----------------------------------------------------"
+    read -p "Confirmar execução? (s/n): " CONFIRM
     [[ ${CONFIRM,,} != 's' ]] && continue
 
     # PASSO 4: EXECUÇÃO
     header
-    echo "${GREEN}PASSO 4: Executando Expansão Universal${RESET}"
-    echo "================================"
+    echo -e "${BOLD}${ICON_SUCCESS} PASSO 4: Executando Expansão${RESET}"
+    echo -e "----------------------------------------------------"
     
     if [[ "$MODO" == "PART" ]]; then
-        progress 2 "Expandindo partição $PART_NUM..."
+        progress 10 "Expandindo partição física..."
         if [[ -z "$EXP_VALUE" ]]; then
             sudo growpart "/dev/$DISCO" "$PART_NUM" >/dev/null 2>&1 || sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" 100% >/dev/null 2>&1
         else
@@ -339,17 +374,17 @@ while true; do
     fi
 
     if [[ "$HAS_LVM" == "yes" ]]; then
-        progress 2 "Redimensionando Physical Volume (PV)..."
+        progress 10 "Redimensionando Physical Volume (PV)..."
         PV_TARGET=$(pvs --noheadings -o pv_name | grep "$DISCO" | head -n1 | xargs)
         [[ -z "$PV_TARGET" ]] && PV_TARGET="$ALVO_NOME"
         sudo pvresize "$PV_TARGET" >/dev/null 2>&1
         
         if [[ -n "$ALVO_LVM" ]]; then
             if [[ -z "$EXP_VALUE" ]]; then
-                progress 2 "Expandindo Logical Volume (LV) ao máximo..."
+                progress 10 "Expandindo Logical Volume (LV)..."
                 sudo lvextend -l +100%FREE "$ALVO_LVM" >/dev/null 2>&1
             else
-                progress 2 "Expandindo Logical Volume (LV) em $EXP_VALUE..."
+                progress 10 "Expandindo Logical Volume (LV)..."
                 sudo lvextend -L +"$EXP_VALUE" "$ALVO_LVM" >/dev/null 2>&1
             fi
         fi
@@ -357,41 +392,37 @@ while true; do
 
     if [[ -n "$MOUNT" && "$MOUNT" != "" ]]; then
         if [[ -n "$TYPE" ]]; then
-            progress 2 "Expandindo Sistema de Arquivos ($TYPE) em $MOUNT..."
+            progress 10 "Expandindo Sistema de Arquivos ($TYPE)..."
             case "$TYPE" in
                 xfs) sudo xfs_growfs "$MOUNT" >/dev/null 2>&1 ;;
                 ext*) sudo resize2fs "$FINAL_TARGET" >/dev/null 2>&1 ;;
                 btrfs) sudo btrfs filesystem resize max "$MOUNT" >/dev/null 2>&1 ;;
-                *) log_message "WARN" "Tipo de FS ($TYPE) não suportado para expansão automática." ;;
             esac
-        else
-            echo "${RED}ERRO: Não foi possível detectar o tipo de sistema de arquivos em $MOUNT!${RESET}"
-            log_message "ERROR" "FSTYPE não detectado para $FINAL_TARGET"
         fi
     fi
 
+    # RESULTADO FINAL
+    header
     if [[ -n "$MOUNT" && "$MOUNT" != "" ]]; then
-        FS_SIZE_AFTER=$(df -B1 "$MOUNT" | tail -n1 | awk '{print $2}')
+        FS_SIZE_AFTER=$(df -h "$MOUNT" | tail -n1 | awk '{print $2}')
     else
-        FS_SIZE_AFTER=$(lsblk -bdno SIZE "$FINAL_TARGET" | head -n1)
+        FS_SIZE_AFTER=$(lsblk -dno SIZE "$FINAL_TARGET" | head -n1)
     fi
 
-    header
-    echo "${GREEN}RESULTADO FINAL${RESET}"
-    echo "=================="
+    if [[ "$FS_SIZE_BEFORE" == "$FS_SIZE_AFTER" ]]; then
+        echo -e "${YELLOW}${BOLD}${ICON_WARN} STATUS: INALTERADO${RESET}"
+        echo -e "  O sistema de arquivos já estava no tamanho máximo ou não havia espaço."
+    else
+        echo -e "${GREEN}${BOLD}${ICON_SUCCESS} OPERAÇÃO CONCLUÍDA COM SUCESSO!${RESET}"
+    fi
+
+    echo -e "----------------------------------------------------"
     if [[ -n "$MOUNT" && "$MOUNT" != "" ]]; then
         df -h "$MOUNT"
     else
         lsblk "$FINAL_TARGET"
     fi
-    
-    echo -e "\n--------------------------------------------------"
-    if [[ "$FS_SIZE_AFTER" -gt "$FS_SIZE_BEFORE" ]]; then
-        echo -e "STATUS: ${GREEN}${BOLD}SUCESSO! Expansão concluída.${RESET}"
-    else
-        echo -e "STATUS: ${YELLOW}${BOLD}INALTERADO: O tamanho não mudou.${RESET}"
-    fi
-    echo -e "--------------------------------------------------"
+    echo -e "----------------------------------------------------"
     
     pause_nav || continue
     exit 0
