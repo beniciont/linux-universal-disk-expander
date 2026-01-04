@@ -3,7 +3,7 @@
 # ==============================================================================
 # LINUX UNIVERSAL DISK EXPANDER - MULTI-CLOUD & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 3.0.5 (ESTÁVEL)
+# Versão: 3.0.6 (ESTÁVEL)
 # Última Atualização: 04/01/2026
 #
 # HISTÓRICO DE VERSÕES:
@@ -15,6 +15,7 @@
 # 3.0.3         - FIX: Cálculo real de nova capacidade e trava de sanidade bloqueante.
 # 3.0.4         - UI: Melhoria na semântica das mensagens de aviso e fluxo de expansão.
 # 3.0.5         - FIX: Validação bloqueante e infalível de valor personalizado.
+# 3.0.6         - FIX: Bloqueio de fluxo quando não há espaço disponível.
 # ==============================================================================
 
 # Configurações de Log
@@ -117,10 +118,10 @@ get_unallocated_space() {
 header() {
     clear
     echo -e "${CYAN}${BOLD}====================================================${RESET}"
-    echo -e "${CYAN}${BOLD}   LINUX UNIVERSAL DISK EXPANDER v3.0.5             ${RESET}"
+    echo -e "${CYAN}${BOLD}   LINUX UNIVERSAL DISK EXPANDER v3.0.6             ${RESET}"
     echo -e "${CYAN}${BOLD}   Multi-Cloud & Virtual Environment Tool           ${RESET}"
     echo -e "${CYAN}${BOLD}====================================================${RESET}"
-    echo -e "   Criado por: Benicio Neto | Versão: ${GREEN}3.0.5${RESET}"
+    echo -e "   Criado por: Benicio Neto | Versão: ${GREEN}3.0.6${RESET}"
     echo -e "${CYAN}${BOLD}====================================================${RESET}"
     echo
 }
@@ -240,15 +241,20 @@ while true; do
             echo -e "  ${CYAN}1)${RESET} Tentar Rescan novamente"
             if (( $(echo "$ESPACO_OCI > 0" | bc -l) )); then
                 echo -e "  ${CYAN}2)${RESET} Prosseguir para Expansão"
-            else
-                echo -e "  ${CYAN}2)${RESET} Forçar verificação (Avançar mesmo assim)"
             fi
             echo -e "  ${CYAN}v)${RESET} Voltar ao Passo 1"
             echo -e "----------------------------------------------------"
             read -p "Opção: " OPT
             case $OPT in
                 1) continue ;;
-                2) break ;;
+                2) 
+                    if (( $(echo "$ESPACO_OCI > 0" | bc -l) )); then
+                        break
+                    else
+                        echo -e "${RED}${ICON_ERROR} Opção inválida! Não há espaço para expandir.${RESET}"
+                        sleep 1; continue
+                    fi
+                    ;;
                 v) continue 2 ;;
                 *) continue ;;
             esac
