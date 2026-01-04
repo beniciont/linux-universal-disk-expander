@@ -3,7 +3,7 @@
 # ==============================================================================
 # LINUX UNIVERSAL DISK EXPANDER - MULTI-CLOUD & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 2.9.6-beta (DESENVOLVIMENTO)
+# Versão: 2.9.7-beta (DESENVOLVIMENTO)
 # Última Atualização: 04/01/2026
 #
 # HISTÓRICO DE VERSÕES:
@@ -15,6 +15,7 @@
 # 2.9.4-beta (04/01/2026) - UI: Exibir espaço não alocado no menu de aviso de rescan.
 # 2.9.5-beta (04/01/2026) - FIX: Fallback de cálculo de espaço baseado no tamanho inicial.
 # 2.9.6-beta (04/01/2026) - FIX: Detecção de FSTYPE via file -s e persistência de tamanho inicial.
+# 2.9.7-beta (04/01/2026) - FIX: Refatoração da detecção de FSTYPE/MOUNT e debug visual.
 # ==============================================================================
 
 # Configurações de Log
@@ -106,9 +107,9 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " LINUX UNIVERSAL DISK EXPANDER v2.9.6-beta "
+    echo " LINUX UNIVERSAL DISK EXPANDER v2.9.7-beta "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.9.6-beta (TESTE)"
+    echo " Versão: 2.9.7-beta (TESTE)"
     echo " Ambiente: Multi-Cloud / Virtual"
     echo "=================================="
     echo
@@ -138,7 +139,7 @@ progress() {
 }
 
 # Início do Script
-log_message "START" "Script Universal v2.9.0-beta iniciado."
+log_message "START" "Script Universal v2.9.7-beta iniciado."
 check_dependencies
 
 while true; do
@@ -239,9 +240,11 @@ while true; do
         
         ALVO_NOME="/dev/$PART_ESCOLHIDA"
         PART_NUM=$(echo "$PART_ESCOLHIDA" | grep -oE "[0-9]+$" | tail -1)
-        MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | head -n1 | xargs)
-        TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | head -n1 | xargs)
+        MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | grep -v "^$" | head -n1 | xargs)
+        TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | grep -v "^$" | head -n1 | xargs)
         [[ -z "$TYPE" ]] && TYPE=$(sudo blkid -o value -s TYPE "$ALVO_NOME")
+        [[ -z "$MOUNT" ]] && MOUNT=$(grep "^$ALVO_NOME " /proc/mounts | awk '{print $2}')
+        [[ -z "$TYPE" ]] && TYPE=$(grep "^$ALVO_NOME " /proc/mounts | awk '{print $3}')
         
         if lsblk -no FSTYPE "$ALVO_NOME" | grep -qi "LVM"; then
             HAS_LVM="yes"
@@ -254,15 +257,19 @@ while true; do
     else
         MODO="RAW"
         ALVO_NOME="/dev/$DISCO"
-        MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | head -n1 | xargs)
-        TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | head -n1 | xargs)
+        MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | grep -v "^$" | head -n1 | xargs)
+        TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | grep -v "^$" | head -n1 | xargs)
         [[ -z "$TYPE" ]] && TYPE=$(sudo blkid -o value -s TYPE "$ALVO_NOME")
-        # Terceira tentativa de detecção de FSTYPE para RAW
-        if [[ -z "$TYPE" ]]; then
-            if sudo file -s "$ALVO_NOME" | grep -qi "ext4"; then TYPE="ext4";
-            elif sudo file -s "$ALVO_NOME" | grep -qi "xfs"; then TYPE="xfs"; fi
-        fi
+        [[ -z "$MOUNT" ]] && MOUNT=$(grep "^$ALVO_NOME " /proc/mounts | awk '{print $2}')
+        [[ -z "$TYPE" ]] && TYPE=$(grep "^$ALVO_NOME " /proc/mounts | awk '{print $3}')
         
+        # Terceira tentativa de detecção de FSTYPE para RAW via file -s
+        if [[ -z "$TYPE" ]]; then
+            local file_out=$(sudo file -s "$ALVO_NOME")
+            if echo "$file_out" | grep -qi "ext4"; then TYPE="ext4";
+            elif echo "$file_out" | grep -qi "xfs"; then TYPE="xfs"; fi
+        fi
+
         if lsblk -no FSTYPE "$ALVO_NOME" | grep -qi "LVM"; then
             HAS_LVM="yes"
             REAL_LV=$(lsblk -ln -o NAME,TYPE "$ALVO_NOME" | grep "lvm" | head -n1 | awk '{print $1}')
@@ -272,6 +279,8 @@ while true; do
             ALVO_LVM=""
         fi
     fi
+    
+    echo -e "${CYAN}DEBUG: Alvo=$ALVO_NOME | Mount=$MOUNT | Type=$TYPE${RESET}"
 
     FINAL_TARGET="${ALVO_LVM:-$ALVO_NOME}"
     
