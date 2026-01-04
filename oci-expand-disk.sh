@@ -3,7 +3,7 @@
 # ==============================================================================
 # LINUX UNIVERSAL DISK EXPANDER - MULTI-CLOUD & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 2.9.3-beta (DESENVOLVIMENTO)
+# Versão: 2.9.4-beta (DESENVOLVIMENTO)
 # Última Atualização: 04/01/2026
 #
 # HISTÓRICO DE VERSÕES:
@@ -12,6 +12,7 @@
 # 2.9.1-beta (04/01/2026) - FIX: Detecção precisa de espaço não alocado em discos RAW.
 # 2.9.2-beta (04/01/2026) - FIX: Melhoria na detecção de espaço para LVM e Partições.
 # 2.9.3-beta (04/01/2026) - FIX: Detecção de FSTYPE e proteção contra expansão vazia.
+# 2.9.4-beta (04/01/2026) - UI: Exibir espaço não alocado no menu de aviso de rescan.
 # ==============================================================================
 
 # Configurações de Log
@@ -130,9 +131,9 @@ get_unallocated_space() {
 header() {
     clear
     echo "=================================="
-    echo " LINUX UNIVERSAL DISK EXPANDER v2.9.3-beta "
+    echo " LINUX UNIVERSAL DISK EXPANDER v2.9.4-beta "
     echo " Criado por: Benicio Neto"
-    echo " Versão: 2.9.3-beta (TESTE)"
+    echo " Versão: 2.9.4-beta (TESTE)"
     echo " Ambiente: Multi-Cloud / Virtual"
     echo "=================================="
     echo
@@ -223,7 +224,9 @@ while true; do
             echo "Espaço não alocado: ${ESPACO_OCI} GB"
             pause_nav && break || continue 2
         else
-            echo -e "\n${RED}AVISO: Nenhum espaço novo detectado ($TAMANHO_ATUAL_HUMANO).${RESET}"
+            echo -e "\n${RED}AVISO: Nenhum espaço novo detectado.${RESET}"
+            echo "Tamanho Atual: $TAMANHO_ATUAL_HUMANO"
+            echo "Espaço não alocado calculado: ${ESPACO_OCI} GB"
             echo "--------------------------------------------------"
             echo "1) Tentar Rescan novamente"
             echo "2) Seguir mesmo assim (Forçar)"
