@@ -3,7 +3,7 @@
 # ==============================================================================
 # LINUX UNIVERSAL DISK EXPANDER - MULTI-CLOUD & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 3.1.0 (DESENVOLVIMENTO)
+# Versão: 3.1.1 (DESENVOLVIMENTO)
 # Última Atualização: 04/01/2026
 #
 # HISTÓRICO DE VERSÕES:
@@ -11,6 +11,7 @@
 # 2.9.0-beta (03/01/2026) - NEW: Rescan agnóstico (OCI, Azure, AWS, VirtualBox).
 # 3.0.9 (05/01/2026) - FIX: Detecção de espaço livre interno no LVM (PFree) e correção de bug na seleção de disco.
 # 3.1.0 (04/01/2026) - REMOVE: Opção "Forçar". IMPROVE: Detecção inteligente de LVM e exibição de espaço disponível.
+# 3.1.1 (04/01/2026) - FIX: Detecção resiliente de LVM PFree e correção de dependências.
 # ==============================================================================
 
 # Configurações de Log
@@ -56,15 +57,15 @@ check_dependencies() {
                 sudo apt-get update >/dev/null 2>&1
                 sudo apt-get install -y "$dep" >/dev/null 2>&1
             fi
+            
+            # Re-verificar após tentativa de instalação
             if ! command -v "$dep" &>/dev/null; then
                 log_message "ERROR" "Falha ao instalar a dependência '$dep'. O script pode não funcionar corretamente."
+            else
+                log_message "INFO" "Dependência '$dep' instalada com sucesso."
             fi
         fi
     done
-    
-    if $installed_deps; then
-        log_message "INFO" "Todas as dependências necessárias foram verificadas."
-    fi
 }
 
 # Função para obter o espaço não alocado
@@ -72,6 +73,7 @@ get_unallocated_space() {
     local disk_name=$1
     local disk="/dev/$disk_name"
     
+    # Tentar corrigir a tabela de partição se necessário
     if command -v sgdisk &>/dev/null; then
         sudo sgdisk -e "$disk" >/dev/null 2>&1
     fi
@@ -82,44 +84,41 @@ get_unallocated_space() {
     local used_bytes=0
     local lvm_free_bytes=0
     
-    # Verificar se o disco tem partições
+    # 1. Verificar espaço livre físico (após a última partição)
     local has_parts=$(lsblk -ln -o TYPE "$disk" | grep -q "part" && echo "yes" || echo "no")
-    
     if [[ "$has_parts" == "yes" ]]; then
-        # Se houver partições, o espaço livre físico é o que sobrou após a última partição
         local last_part_end_sector=$(sudo parted -s "$disk" unit s print | grep -E "^ [0-9]+" | tail -n1 | awk '{print $3}' | tr -d 's')
-        local sector_size=512
-        used_bytes=$((last_part_end_sector * sector_size))
-        
-        # Verificar espaço livre em todos os PVs associados a este disco
-        local parts=$(lsblk -ln -o NAME,TYPE "$disk" | grep "part" | awk '{print $1}')
-        for part in $parts; do
-            local pv_info=$(sudo pvs --noheadings --units b --options pv_free "/dev/$part" 2>/dev/null | xargs)
-            if [[ -n "$pv_info" ]]; then
-                local pv_free=$(echo "$pv_info" | grep -oE "[0-9]+")
-                lvm_free_bytes=$((lvm_free_bytes + pv_free))
-            fi
-        done
+        [[ -z "$last_part_end_sector" ]] && last_part_end_sector=0
+        used_bytes=$((last_part_end_sector * 512))
     else
-        # Se for disco RAW, verificar se é um PV
-        local pv_info=$(sudo pvs --noheadings --units b --options pv_size,pv_free "$disk" 2>/dev/null | xargs)
-        if [[ -n "$pv_info" ]]; then
-            local pv_size=$(echo "$pv_info" | awk '{print $1}' | grep -oE "[0-9]+")
-            local pv_free=$(echo "$pv_info" | awk '{print $2}' | grep -oE "[0-9]+")
-            used_bytes=$((pv_size - pv_free))
-            lvm_free_bytes=$pv_free
+        # Se não tem partição, pode ser RAW ou LVM direto no disco
+        if lsblk -no FSTYPE "$disk" | grep -q "."; then
+            used_bytes=$disk_size_bytes
         else
-            if lsblk -no FSTYPE "$disk" | grep -q "."; then
-                used_bytes=$disk_size_bytes
-            else
-                used_bytes=0
-            fi
+            used_bytes=0
         fi
     fi
 
+    # 2. Verificar espaço livre LVM (PFree) de forma resiliente
+    # Usamos lsblk para encontrar PVs associados ao disco
+    local pvs_found=$(lsblk -ln -o NAME,FSTYPE "$disk" | grep "LVM" | awk '{print $1}')
+    for pv in $pvs_found; do
+        # Se o nome não começar com /, adicionamos /dev/
+        local pv_path=$pv
+        [[ ! "$pv_path" =~ ^/ ]] && pv_path="/dev/$pv"
+        
+        # Tentar obter PFree usando pvs
+        if command -v pvs &>/dev/null; then
+            local pv_free=$(sudo pvs --noheadings --units b --options pv_free "$pv_path" 2>/dev/null | grep -oE "[0-9]+")
+            if [[ -n "$pv_free" ]]; then
+                lvm_free_bytes=$((lvm_free_bytes + pv_free))
+            fi
+        fi
+    done
+
     local physical_free_bytes=$((disk_size_bytes - used_bytes))
+    [[ "$physical_free_bytes" -lt 0 ]] && physical_free_bytes=0
     
-    # O espaço total livre é a soma do espaço físico não alocado e o espaço livre interno do LVM (PFree)
     local total_free_bytes=$((physical_free_bytes + lvm_free_bytes))
     
     log_message "DEBUG" "get_unallocated_space($disk): Total=$disk_size_bytes, Usado=$used_bytes, PFree_LVM=$lvm_free_bytes, Livre_Fisico=$physical_free_bytes, Livre_Total=$total_free_bytes"
@@ -134,10 +133,10 @@ get_unallocated_space() {
 header() {
     clear
     echo "===================================================="
-    echo "   LINUX UNIVERSAL DISK EXPANDER v3.1.0"
+    echo "   LINUX UNIVERSAL DISK EXPANDER v3.1.1"
     echo "   Multi-Cloud & Virtual Environment Tool"
     echo "===================================================="
-    echo "   Criado por: Benicio Neto | Versão: 3.1.0"
+    echo "   Criado por: Benicio Neto | Versão: 3.1.1"
     echo "===================================================="
     echo
 }
@@ -166,13 +165,12 @@ progress() {
     echo "  ${GREEN}✅ $msg... concluído.${RESET}"
 }
 
-log_message "START" "Script Universal v3.1.0 iniciado."
+log_message "START" "Script Universal v3.1.1 iniciado."
 check_dependencies
 
 while true; do
     header
     
-    # 1. Criar lista de discos de forma robusta
     DISCOS=()
     mapfile -t DISCOS < <(lsblk -d -n -o NAME,TYPE | grep "disk" | awk '{print $1}')
 
@@ -345,10 +343,10 @@ while true; do
     echo "----------------------------------------------------"
     
     if [[ "$MODO" == "PART" ]]; then
-        # Só redimensiona a partição se houver espaço físico livre no disco
         DISK_SIZE_BYTES=$(cat "/sys/block/$DISCO/size" 2>/dev/null)
         DISK_SIZE_BYTES=$((DISK_SIZE_BYTES * 512))
         LAST_PART_END_SECTOR=$(sudo parted -s "/dev/$DISCO" unit s print | grep -E "^ [0-9]+" | tail -n1 | awk '{print $3}' | tr -d 's')
+        [[ -z "$LAST_PART_END_SECTOR" ]] && LAST_PART_END_SECTOR=0
         USED_BYTES=$((LAST_PART_END_SECTOR * 512))
         
         if [[ "$DISK_SIZE_BYTES" -gt "$USED_BYTES" ]]; then
