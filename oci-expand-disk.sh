@@ -3,13 +3,14 @@
 # ==============================================================================
 # LINUX UNIVERSAL DISK EXPANDER - MULTI-CLOUD & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 3.0.9 (DESENVOLVIMENTO)
-# Última Atualização: 05/01/2026
+# Versão: 3.1.0 (DESENVOLVIMENTO)
+# Última Atualização: 04/01/2026
 #
 # HISTÓRICO DE VERSÕES:
 # 1.0.0 a 2.8.0 - Evolução focada em OCI.
 # 2.9.0-beta (03/01/2026) - NEW: Rescan agnóstico (OCI, Azure, AWS, VirtualBox).
 # 3.0.9 (05/01/2026) - FIX: Detecção de espaço livre interno no LVM (PFree) e correção de bug na seleção de disco.
+# 3.1.0 (04/01/2026) - REMOVE: Opção "Forçar". IMPROVE: Detecção inteligente de LVM e exibição de espaço disponível.
 # ==============================================================================
 
 # Configurações de Log
@@ -81,30 +82,26 @@ get_unallocated_space() {
     local used_bytes=0
     local lvm_free_bytes=0
     
+    # Verificar se o disco tem partições
     local has_parts=$(lsblk -ln -o TYPE "$disk" | grep -q "part" && echo "yes" || echo "no")
     
     if [[ "$has_parts" == "yes" ]]; then
-        # Se houver partições, o espaço livre é o que sobrou no disco físico
-        # O parted printa o último setor usado, mas é mais fácil calcular o espaço livre
-        # comparando o tamanho total do disco com o tamanho da última partição.
-        # Para simplificar, vamos usar o tamanho total do disco menos o tamanho da última partição
-        # (que é a que será expandida)
+        # Se houver partições, o espaço livre físico é o que sobrou após a última partição
         local last_part_end_sector=$(sudo parted -s "$disk" unit s print | grep -E "^ [0-9]+" | tail -n1 | awk '{print $3}' | tr -d 's')
         local sector_size=512
         used_bytes=$((last_part_end_sector * sector_size))
         
-        # Detecção robusta de LVM PFree (se a última partição for um PV)
-        local last_part_name=$(lsblk -ln -o NAME,TYPE "$disk" | grep "part" | tail -n1 | awk '{print $1}')
-        local pv_info=$(sudo pvs --noheadings --units b --options pv_size,pv_free "/dev/$last_part_name" 2>/dev/null | xargs)
-        if [[ -n "$pv_info" ]]; then
-            local pv_size=$(echo "$pv_info" | awk '{print $1}' | grep -oE "[0-9]+")
-            local pv_free=$(echo "$pv_info" | awk '{print $2}' | grep -oE "[0-9]+")
-            lvm_free_bytes=$pv_free
-            # Se for LVM, o espaço livre físico é o que sobrou no disco, mas o espaço livre
-            # para o usuário é o PFree do PV, se o disco não tiver crescido.
-        fi
+        # Verificar espaço livre em todos os PVs associados a este disco
+        local parts=$(lsblk -ln -o NAME,TYPE "$disk" | grep "part" | awk '{print $1}')
+        for part in $parts; do
+            local pv_info=$(sudo pvs --noheadings --units b --options pv_free "/dev/$part" 2>/dev/null | xargs)
+            if [[ -n "$pv_info" ]]; then
+                local pv_free=$(echo "$pv_info" | grep -oE "[0-9]+")
+                lvm_free_bytes=$((lvm_free_bytes + pv_free))
+            fi
+        done
     else
-        # Se for disco RAW, o espaço livre é 0, a menos que seja um PV
+        # Se for disco RAW, verificar se é um PV
         local pv_info=$(sudo pvs --noheadings --units b --options pv_size,pv_free "$disk" 2>/dev/null | xargs)
         if [[ -n "$pv_info" ]]; then
             local pv_size=$(echo "$pv_info" | awk '{print $1}' | grep -oE "[0-9]+")
@@ -122,12 +119,12 @@ get_unallocated_space() {
 
     local physical_free_bytes=$((disk_size_bytes - used_bytes))
     
-    # O espaço total livre é o maior entre o espaço físico não alocado e o espaço livre interno do LVM (PFree)
-    local total_free_bytes=$((physical_free_bytes > lvm_free_bytes ? physical_free_bytes : lvm_free_bytes))
+    # O espaço total livre é a soma do espaço físico não alocado e o espaço livre interno do LVM (PFree)
+    local total_free_bytes=$((physical_free_bytes + lvm_free_bytes))
     
     log_message "DEBUG" "get_unallocated_space($disk): Total=$disk_size_bytes, Usado=$used_bytes, PFree_LVM=$lvm_free_bytes, Livre_Fisico=$physical_free_bytes, Livre_Total=$total_free_bytes"
 
-    if [[ "$total_free_bytes" -lt 104857600 ]]; then # Menos de 100MB
+    if [[ "$total_free_bytes" -lt 10485760 ]]; then # Menos de 10MB
         echo "0"
     else
         echo "scale=2; $total_free_bytes / 1024 / 1024 / 1024" | bc
@@ -137,10 +134,10 @@ get_unallocated_space() {
 header() {
     clear
     echo "===================================================="
-    echo "   LINUX UNIVERSAL DISK EXPANDER v3.0.9"
+    echo "   LINUX UNIVERSAL DISK EXPANDER v3.1.0"
     echo "   Multi-Cloud & Virtual Environment Tool"
     echo "===================================================="
-    echo "   Criado por: Benicio Neto | Versão: 3.0.9"
+    echo "   Criado por: Benicio Neto | Versão: 3.1.0"
     echo "===================================================="
     echo
 }
@@ -169,7 +166,7 @@ progress() {
     echo "  ${GREEN}✅ $msg... concluído.${RESET}"
 }
 
-log_message "START" "Script Universal v3.0.9 iniciado."
+log_message "START" "Script Universal v3.1.0 iniciado."
 check_dependencies
 
 while true; do
@@ -177,12 +174,10 @@ while true; do
     
     # 1. Criar lista de discos de forma robusta
     DISCOS=()
-    # mapfile é mais robusto que o loop while read
     mapfile -t DISCOS < <(lsblk -d -n -o NAME,TYPE | grep "disk" | awk '{print $1}')
 
     echo "${YELLOW}📦 PASSO 1: Seleção de Disco Físico${RESET}"
     echo "----------------------------------------------------"
-    # Exibir lista usando a mesma fonte para garantir consistência
     lsblk -d -n -o NAME,SIZE,TYPE,MODEL | grep "disk" | awk '{print "  " NR ") " $1 " " $2 " " $4}'
     echo "  q) Sair do script"
     echo "----------------------------------------------------"
@@ -192,14 +187,12 @@ while true; do
     [[ ${ESCOLHA,,} == 'q' ]] && exit 0
     
     if [[ "$ESCOLHA" =~ ^[0-9]+$ ]]; then
-        # 3. Selecionar pelo índice do array
         INDEX=$((ESCOLHA - 1))
         DISCO=${DISCOS[$INDEX]}
     else
         DISCO=$ESCOLHA
     fi
     
-    # Limpar a variável DISCO de qualquer espaço em branco
     DISCO=$(echo "$DISCO" | xargs)
 
     if [[ -z "$DISCO" || ! -b "/dev/$DISCO" ]]; then
@@ -236,21 +229,20 @@ while true; do
         if (( $(echo "$ESPACO_LIVRE > 0" | bc -l) )); then
             echo -e "\n${GREEN}${BOLD}✅ SUCESSO! Espaço disponível detectado.${RESET}"
             echo "  Tamanho Atual do Disco: $TAMANHO_ATUAL_HUMANO"
-            echo "  Espaço para Expansão: ${ESPACO_LIVRE} GB"
+            echo "  Espaço Total para Expansão: ${ESPACO_LIVRE} GB"
+            echo "  (Inclui espaço físico não alocado e espaço livre em LVM)"
             pause_nav && break || continue 2
         else
             echo -e "\n${RED}❌ AVISO: Nenhum espaço disponível para expansão.${RESET}"
             echo "  Tamanho Atual do Disco: $TAMANHO_ATUAL_HUMANO"
             echo "----------------------------------------------------"
             echo "  1) Tentar Rescan novamente"
-            echo "  2) Seguir mesmo assim (Forçar)"
             echo "  v) Voltar ao Passo 1"
             echo "----------------------------------------------------"
             echo -n "Opção: "
             read OPT
             case $OPT in
                 1) continue ;;
-                2) break ;;
                 v) continue 2 ;;
                 *) continue ;;
             esac
@@ -283,8 +275,16 @@ while true; do
         
         if lsblk -no FSTYPE "$ALVO_NOME" | grep -qi "LVM"; then
             HAS_LVM="yes"
-            REAL_LV=$(lsblk -ln -o NAME,TYPE "$ALVO_NOME" | grep "lvm" | head -n1 | awk '{print $1}')
-            [[ -n "$REAL_LV" ]] && ALVO_LVM="/dev/mapper/$REAL_LV" || ALVO_LVM=""
+            echo -e "\n${YELLOW}Volumes LVM detectados nesta partição:${RESET}"
+            lsblk -ln -o NAME,TYPE,SIZE,MOUNTPOINT "$ALVO_NOME" | grep "lvm" | awk '{print "  - " $1 " (" $3 ") " $4}'
+            echo -n "Digite o nome do Logical Volume (LV) para expandir (ex: vg_teste-lv_dados): "
+            read LV_ESCOLHIDO
+            [[ -n "$LV_ESCOLHIDO" ]] && ALVO_LVM="/dev/mapper/$LV_ESCOLHIDO" || ALVO_LVM=""
+            
+            if [[ -n "$ALVO_LVM" ]]; then
+                MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_LVM" | head -n1)
+                TYPE=$(lsblk -no FSTYPE "$ALVO_LVM" | head -n1)
+            fi
         else
             HAS_LVM="no"
             ALVO_LVM=""
@@ -297,8 +297,16 @@ while true; do
         
         if lsblk -no FSTYPE "$ALVO_NOME" | grep -qi "LVM"; then
             HAS_LVM="yes"
-            REAL_LV=$(lsblk -ln -o NAME,TYPE "$ALVO_NOME" | grep "lvm" | head -n1 | awk '{print $1}')
-            [[ -n "$REAL_LV" ]] && ALVO_LVM="/dev/mapper/$REAL_LV" || ALVO_LVM=""
+            echo -e "\n${YELLOW}Volumes LVM detectados neste disco:${RESET}"
+            lsblk -ln -o NAME,TYPE,SIZE,MOUNTPOINT "$ALVO_NOME" | grep "lvm" | awk '{print "  - " $1 " (" $3 ") " $4}'
+            echo -n "Digite o nome do Logical Volume (LV) para expandir: "
+            read LV_ESCOLHIDO
+            [[ -n "$LV_ESCOLHIDO" ]] && ALVO_LVM="/dev/mapper/$LV_ESCOLHIDO" || ALVO_LVM=""
+            
+            if [[ -n "$ALVO_LVM" ]]; then
+                MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_LVM" | head -n1)
+                TYPE=$(lsblk -no FSTYPE "$ALVO_LVM" | head -n1)
+            fi
         else
             HAS_LVM="no"
             ALVO_LVM=""
@@ -337,13 +345,21 @@ while true; do
     echo "----------------------------------------------------"
     
     if [[ "$MODO" == "PART" ]]; then
-        progress 5 "Redimensionando partição física..."
-        if [[ -z "$EXP_VALUE" ]]; then
-            sudo growpart "/dev/$DISCO" "$PART_NUM" >/dev/null 2>&1 || sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" 100% >/dev/null 2>&1
-        else
-            sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" "$EXP_VALUE" >/dev/null 2>&1
+        # Só redimensiona a partição se houver espaço físico livre no disco
+        DISK_SIZE_BYTES=$(cat "/sys/block/$DISCO/size" 2>/dev/null)
+        DISK_SIZE_BYTES=$((DISK_SIZE_BYTES * 512))
+        LAST_PART_END_SECTOR=$(sudo parted -s "/dev/$DISCO" unit s print | grep -E "^ [0-9]+" | tail -n1 | awk '{print $3}' | tr -d 's')
+        USED_BYTES=$((LAST_PART_END_SECTOR * 512))
+        
+        if [[ "$DISK_SIZE_BYTES" -gt "$USED_BYTES" ]]; then
+            progress 5 "Redimensionando partição física..."
+            if [[ -z "$EXP_VALUE" ]]; then
+                sudo growpart "/dev/$DISCO" "$PART_NUM" >/dev/null 2>&1 || sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" 100% >/dev/null 2>&1
+            else
+                sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" "$EXP_VALUE" >/dev/null 2>&1
+            fi
+            sudo partprobe "/dev/$DISCO" >/dev/null 2>&1
         fi
-        sudo partprobe "/dev/$DISCO" >/dev/null 2>&1
     fi
 
     if [[ "$HAS_LVM" == "yes" ]]; then
