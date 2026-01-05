@@ -175,11 +175,10 @@ check_dependencies
 while true; do
     header
     
-    # 1. Criar lista de discos
+    # 1. Criar lista de discos de forma robusta
     DISCOS=()
-    while IFS= read -r line; do
-        DISCOS+=("$line")
-    done < <(lsblk -d -n -o NAME | grep "disk" | awk '{print $1}')
+    # mapfile é mais robusto que o loop while read
+    mapfile -t DISCOS < <(lsblk -d -n -o NAME,TYPE | grep "disk" | awk '{print $1}')
 
     echo "${YELLOW}📦 PASSO 1: Seleção de Disco Físico${RESET}"
     echo "----------------------------------------------------"
@@ -199,6 +198,9 @@ while true; do
     else
         DISCO=$ESCOLHA
     fi
+    
+    # Limpar a variável DISCO de qualquer espaço em branco
+    DISCO=$(echo "$DISCO" | xargs)
 
     if [[ -z "$DISCO" || ! -b "/dev/$DISCO" ]]; then
         echo "${RED}ERRO: Disco /dev/$DISCO não encontrado!${RESET}"; sleep 2; continue
