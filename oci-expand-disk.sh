@@ -3,7 +3,7 @@
 # ==============================================================================
 # LINUX UNIVERSAL DISK EXPANDER - MULTI-CLOUD & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 3.1.1 (DESENVOLVIMENTO)
+# Versão: 3.1.2 (DESENVOLVIMENTO)
 # Última Atualização: 04/01/2026
 #
 # HISTÓRICO DE VERSÕES:
@@ -12,6 +12,7 @@
 # 3.0.9 (05/01/2026) - FIX: Detecção de espaço livre interno no LVM (PFree) e correção de bug na seleção de disco.
 # 3.1.0 (04/01/2026) - REMOVE: Opção "Forçar". IMPROVE: Detecção inteligente de LVM e exibição de espaço disponível.
 # 3.1.1 (04/01/2026) - FIX: Detecção resiliente de LVM PFree e correção de dependências.
+# 3.1.2 (04/01/2026) - IMPROVE: Seleção numérica para partições e volumes LVM.
 # ==============================================================================
 
 # Configurações de Log
@@ -45,12 +46,10 @@ log_message() {
 # Função para instalar dependências
 check_dependencies() {
     local deps=("gdisk" "parted" "xfsprogs" "e2fsprogs" "bc" "lvm2")
-    local installed_deps=true
     
     for dep in "${deps[@]}"; do
         if ! command -v "$dep" &>/dev/null; then
             log_message "INFO" "Dependência '$dep' não encontrada. Tentando instalar..."
-            installed_deps=false
             if command -v yum &>/dev/null; then
                 sudo yum install -y "$dep" >/dev/null 2>&1
             elif command -v apt-get &>/dev/null; then
@@ -58,7 +57,6 @@ check_dependencies() {
                 sudo apt-get install -y "$dep" >/dev/null 2>&1
             fi
             
-            # Re-verificar após tentativa de instalação
             if ! command -v "$dep" &>/dev/null; then
                 log_message "ERROR" "Falha ao instalar a dependência '$dep'. O script pode não funcionar corretamente."
             else
@@ -73,7 +71,6 @@ get_unallocated_space() {
     local disk_name=$1
     local disk="/dev/$disk_name"
     
-    # Tentar corrigir a tabela de partição se necessário
     if command -v sgdisk &>/dev/null; then
         sudo sgdisk -e "$disk" >/dev/null 2>&1
     fi
@@ -84,14 +81,12 @@ get_unallocated_space() {
     local used_bytes=0
     local lvm_free_bytes=0
     
-    # 1. Verificar espaço livre físico (após a última partição)
     local has_parts=$(lsblk -ln -o TYPE "$disk" | grep -q "part" && echo "yes" || echo "no")
     if [[ "$has_parts" == "yes" ]]; then
         local last_part_end_sector=$(sudo parted -s "$disk" unit s print | grep -E "^ [0-9]+" | tail -n1 | awk '{print $3}' | tr -d 's')
         [[ -z "$last_part_end_sector" ]] && last_part_end_sector=0
         used_bytes=$((last_part_end_sector * 512))
     else
-        # Se não tem partição, pode ser RAW ou LVM direto no disco
         if lsblk -no FSTYPE "$disk" | grep -q "."; then
             used_bytes=$disk_size_bytes
         else
@@ -99,15 +94,10 @@ get_unallocated_space() {
         fi
     fi
 
-    # 2. Verificar espaço livre LVM (PFree) de forma resiliente
-    # Usamos lsblk para encontrar PVs associados ao disco
     local pvs_found=$(lsblk -ln -o NAME,FSTYPE "$disk" | grep "LVM" | awk '{print $1}')
     for pv in $pvs_found; do
-        # Se o nome não começar com /, adicionamos /dev/
         local pv_path=$pv
         [[ ! "$pv_path" =~ ^/ ]] && pv_path="/dev/$pv"
-        
-        # Tentar obter PFree usando pvs
         if command -v pvs &>/dev/null; then
             local pv_free=$(sudo pvs --noheadings --units b --options pv_free "$pv_path" 2>/dev/null | grep -oE "[0-9]+")
             if [[ -n "$pv_free" ]]; then
@@ -118,7 +108,6 @@ get_unallocated_space() {
 
     local physical_free_bytes=$((disk_size_bytes - used_bytes))
     [[ "$physical_free_bytes" -lt 0 ]] && physical_free_bytes=0
-    
     local total_free_bytes=$((physical_free_bytes + lvm_free_bytes))
     
     log_message "DEBUG" "get_unallocated_space($disk): Total=$disk_size_bytes, Usado=$used_bytes, PFree_LVM=$lvm_free_bytes, Livre_Fisico=$physical_free_bytes, Livre_Total=$total_free_bytes"
@@ -133,10 +122,10 @@ get_unallocated_space() {
 header() {
     clear
     echo "===================================================="
-    echo "   LINUX UNIVERSAL DISK EXPANDER v3.1.1"
+    echo "   LINUX UNIVERSAL DISK EXPANDER v3.1.2"
     echo "   Multi-Cloud & Virtual Environment Tool"
     echo "===================================================="
-    echo "   Criado por: Benicio Neto | Versão: 3.1.1"
+    echo "   Criado por: Benicio Neto | Versão: 3.1.2"
     echo "===================================================="
     echo
 }
@@ -165,7 +154,7 @@ progress() {
     echo "  ${GREEN}✅ $msg... concluído.${RESET}"
 }
 
-log_message "START" "Script Universal v3.1.1 iniciado."
+log_message "START" "Script Universal v3.1.2 iniciado."
 check_dependencies
 
 while true; do
@@ -192,7 +181,6 @@ while true; do
     fi
     
     DISCO=$(echo "$DISCO" | xargs)
-
     if [[ -z "$DISCO" || ! -b "/dev/$DISCO" ]]; then
         echo "${RED}ERRO: Disco /dev/$DISCO não encontrado!${RESET}"; sleep 2; continue
     fi
@@ -257,10 +245,15 @@ while true; do
     
     if [[ "$HAS_PART" == "yes" ]]; then
         MODO="PART"
-        PARTS_AVAILABLE=$(lsblk -ln -o NAME,TYPE "/dev/$DISCO" | grep "part" | awk '{print $1}')
-        echo -e "\n${BLUE}Partições encontradas: $PARTS_AVAILABLE${RESET}"
-        echo -n "Digite o nome da partição alvo (ex: sda3): "
-        read PART_ESCOLHIDA
+        echo -e "\n${BLUE}Selecione a partição alvo:${RESET}"
+        PARTS=()
+        mapfile -t PARTS < <(lsblk -ln -o NAME,TYPE "/dev/$DISCO" | grep "part" | awk '{print $1}')
+        for i in "${!PARTS[@]}"; do
+            echo "  $((i+1))) /dev/${PARTS[$i]}"
+        done
+        echo -n "Escolha o número: "
+        read P_IDX
+        PART_ESCOLHIDA=${PARTS[$((P_IDX-1))]}
         
         if [[ -z "$PART_ESCOLHIDA" || ! -b "/dev/$PART_ESCOLHIDA" ]]; then
             echo "${RED}ERRO: Partição inválida!${RESET}"; sleep 2; continue
@@ -273,11 +266,19 @@ while true; do
         
         if lsblk -no FSTYPE "$ALVO_NOME" | grep -qi "LVM"; then
             HAS_LVM="yes"
-            echo -e "\n${YELLOW}Volumes LVM detectados nesta partição:${RESET}"
-            lsblk -ln -o NAME,TYPE,SIZE,MOUNTPOINT "$ALVO_NOME" | grep "lvm" | awk '{print "  - " $1 " (" $3 ") " $4}'
-            echo -n "Digite o nome do Logical Volume (LV) para expandir (ex: vg_teste-lv_dados): "
-            read LV_ESCOLHIDO
-            [[ -n "$LV_ESCOLHIDO" ]] && ALVO_LVM="/dev/mapper/$LV_ESCOLHIDO" || ALVO_LVM=""
+            echo -e "\n${YELLOW}Selecione o Logical Volume (LV) para expandir:${RESET}"
+            LVS=()
+            mapfile -t LVS < <(lsblk -ln -o NAME,TYPE "$ALVO_NOME" | grep "lvm" | awk '{print $1}')
+            for i in "${!LVS[@]}"; do
+                LV_SIZE=$(lsblk -no SIZE "/dev/mapper/${LVS[$i]}" 2>/dev/null || lsblk -no SIZE "/dev/${LVS[$i]}")
+                echo "  $((i+1))) ${LVS[$i]} ($LV_SIZE)"
+            done
+            echo -n "Escolha o número (ou ENTER para pular): "
+            read L_IDX
+            if [[ -n "$L_IDX" ]]; then
+                LV_ESCOLHIDO=${LVS[$((L_IDX-1))]}
+                [[ -n "$LV_ESCOLHIDO" ]] && ALVO_LVM="/dev/mapper/$LV_ESCOLHIDO" || ALVO_LVM=""
+            fi
             
             if [[ -n "$ALVO_LVM" ]]; then
                 MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_LVM" | head -n1)
@@ -295,11 +296,19 @@ while true; do
         
         if lsblk -no FSTYPE "$ALVO_NOME" | grep -qi "LVM"; then
             HAS_LVM="yes"
-            echo -e "\n${YELLOW}Volumes LVM detectados neste disco:${RESET}"
-            lsblk -ln -o NAME,TYPE,SIZE,MOUNTPOINT "$ALVO_NOME" | grep "lvm" | awk '{print "  - " $1 " (" $3 ") " $4}'
-            echo -n "Digite o nome do Logical Volume (LV) para expandir: "
-            read LV_ESCOLHIDO
-            [[ -n "$LV_ESCOLHIDO" ]] && ALVO_LVM="/dev/mapper/$LV_ESCOLHIDO" || ALVO_LVM=""
+            echo -e "\n${YELLOW}Selecione o Logical Volume (LV) para expandir:${RESET}"
+            LVS=()
+            mapfile -t LVS < <(lsblk -ln -o NAME,TYPE "$ALVO_NOME" | grep "lvm" | awk '{print $1}')
+            for i in "${!LVS[@]}"; do
+                LV_SIZE=$(lsblk -no SIZE "/dev/mapper/${LVS[$i]}" 2>/dev/null || lsblk -no SIZE "/dev/${LVS[$i]}")
+                echo "  $((i+1))) ${LVS[$i]} ($LV_SIZE)"
+            done
+            echo -n "Escolha o número (ou ENTER para pular): "
+            read L_IDX
+            if [[ -n "$L_IDX" ]]; then
+                LV_ESCOLHIDO=${LVS[$((L_IDX-1))]}
+                [[ -n "$LV_ESCOLHIDO" ]] && ALVO_LVM="/dev/mapper/$LV_ESCOLHIDO" || ALVO_LVM=""
+            fi
             
             if [[ -n "$ALVO_LVM" ]]; then
                 MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_LVM" | head -n1)
@@ -312,7 +321,6 @@ while true; do
     fi
 
     FINAL_TARGET="${ALVO_LVM:-$ALVO_NOME}"
-    
     if [[ -n "$MOUNT" ]]; then
         FS_SIZE_BEFORE=$(df -B1 "$MOUNT" | tail -n1 | awk '{print $2}')
     else
