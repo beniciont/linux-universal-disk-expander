@@ -4,12 +4,12 @@
 # LINUX UNIVERSAL DISK EXPANDER - MULTI-CLOUD & VIRTUAL
 # Criado por: Benicio Neto
 # Versão: 3.0.9 (DESENVOLVIMENTO)
-# Última Atualização: 03/01/2026
+# Última Atualização: 05/01/2026
 #
 # HISTÓRICO DE VERSÕES:
 # 1.0.0 a 2.8.0 - Evolução focada em OCI.
 # 2.9.0-beta (03/01/2026) - NEW: Rescan agnóstico (OCI, Azure, AWS, VirtualBox).
-# 3.0.9 (03/01/2026) - FIX: Detecção de espaço livre interno no LVM (PFree).
+# 3.0.9 (05/01/2026) - FIX: Detecção de espaço livre interno no LVM (PFree) e correção de bug na seleção de disco.
 # ==============================================================================
 
 # Configurações de Log
@@ -42,18 +42,28 @@ log_message() {
 
 # Função para instalar dependências
 check_dependencies() {
-    local deps=("gdisk" "util-linux" "parted" "xfsprogs" "e2fsprogs" "bc" "lvm2")
+    local deps=("gdisk" "parted" "xfsprogs" "e2fsprogs" "bc" "lvm2")
+    local installed_deps=true
+    
     for dep in "${deps[@]}"; do
-        if ! command -v "$dep" &>/dev/null && [[ "$dep" != "util-linux" ]]; then
-            log_message "INFO" "$dep não encontrado. Tentando instalar..."
+        if ! command -v "$dep" &>/dev/null; then
+            log_message "INFO" "Dependência '$dep' não encontrada. Tentando instalar..."
+            installed_deps=false
             if command -v yum &>/dev/null; then
                 sudo yum install -y "$dep" >/dev/null 2>&1
             elif command -v apt-get &>/dev/null; then
                 sudo apt-get update >/dev/null 2>&1
                 sudo apt-get install -y "$dep" >/dev/null 2>&1
             fi
+            if ! command -v "$dep" &>/dev/null; then
+                log_message "ERROR" "Falha ao instalar a dependência '$dep'. O script pode não funcionar corretamente."
+            fi
         fi
     done
+    
+    if $installed_deps; then
+        log_message "INFO" "Todas as dependências necessárias foram verificadas."
+    fi
 }
 
 # Função para obter o espaço não alocado
@@ -74,9 +84,27 @@ get_unallocated_space() {
     local has_parts=$(lsblk -ln -o TYPE "$disk" | grep -q "part" && echo "yes" || echo "no")
     
     if [[ "$has_parts" == "yes" ]]; then
-        used_bytes=$(sudo parted -s "$disk" unit B print | grep -E "^ [0-9]+" | tail -n1 | awk '{print $3}' | tr -d 'B')
+        # Se houver partições, o espaço livre é o que sobrou no disco físico
+        # O parted printa o último setor usado, mas é mais fácil calcular o espaço livre
+        # comparando o tamanho total do disco com o tamanho da última partição.
+        # Para simplificar, vamos usar o tamanho total do disco menos o tamanho da última partição
+        # (que é a que será expandida)
+        local last_part_end_sector=$(sudo parted -s "$disk" unit s print | grep -E "^ [0-9]+" | tail -n1 | awk '{print $3}' | tr -d 's')
+        local sector_size=512
+        used_bytes=$((last_part_end_sector * sector_size))
+        
+        # Detecção robusta de LVM PFree (se a última partição for um PV)
+        local last_part_name=$(lsblk -ln -o NAME,TYPE "$disk" | grep "part" | tail -n1 | awk '{print $1}')
+        local pv_info=$(sudo pvs --noheadings --units b --options pv_size,pv_free "/dev/$last_part_name" 2>/dev/null | xargs)
+        if [[ -n "$pv_info" ]]; then
+            local pv_size=$(echo "$pv_info" | awk '{print $1}' | grep -oE "[0-9]+")
+            local pv_free=$(echo "$pv_info" | awk '{print $2}' | grep -oE "[0-9]+")
+            lvm_free_bytes=$pv_free
+            # Se for LVM, o espaço livre físico é o que sobrou no disco, mas o espaço livre
+            # para o usuário é o PFree do PV, se o disco não tiver crescido.
+        fi
     else
-        # Detecção robusta de LVM PFree
+        # Se for disco RAW, o espaço livre é 0, a menos que seja um PV
         local pv_info=$(sudo pvs --noheadings --units b --options pv_size,pv_free "$disk" 2>/dev/null | xargs)
         if [[ -n "$pv_info" ]]; then
             local pv_size=$(echo "$pv_info" | awk '{print $1}' | grep -oE "[0-9]+")
@@ -93,11 +121,13 @@ get_unallocated_space() {
     fi
 
     local physical_free_bytes=$((disk_size_bytes - used_bytes))
+    
+    # O espaço total livre é o maior entre o espaço físico não alocado e o espaço livre interno do LVM (PFree)
     local total_free_bytes=$((physical_free_bytes > lvm_free_bytes ? physical_free_bytes : lvm_free_bytes))
     
-    log_message "DEBUG" "get_unallocated_space($disk): Total=$disk_size_bytes, Usado=$used_bytes, PFree_LVM=$lvm_free_bytes, Livre_Total=$total_free_bytes"
+    log_message "DEBUG" "get_unallocated_space($disk): Total=$disk_size_bytes, Usado=$used_bytes, PFree_LVM=$lvm_free_bytes, Livre_Fisico=$physical_free_bytes, Livre_Total=$total_free_bytes"
 
-    if [[ "$total_free_bytes" -lt 104857600 ]]; then
+    if [[ "$total_free_bytes" -lt 104857600 ]]; then # Menos de 100MB
         echo "0"
     else
         echo "scale=2; $total_free_bytes / 1024 / 1024 / 1024" | bc
@@ -144,8 +174,16 @@ check_dependencies
 
 while true; do
     header
+    
+    # 1. Criar lista de discos
+    DISCOS=()
+    while IFS= read -r line; do
+        DISCOS+=("$line")
+    done < <(lsblk -d -n -o NAME | grep "disk" | awk '{print $1}')
+
     echo "${YELLOW}📦 PASSO 1: Seleção de Disco Físico${RESET}"
     echo "----------------------------------------------------"
+    # Exibir lista usando a mesma fonte para garantir consistência
     lsblk -d -n -o NAME,SIZE,TYPE,MODEL | grep "disk" | awk '{print "  " NR ") " $1 " " $2 " " $4}'
     echo "  q) Sair do script"
     echo "----------------------------------------------------"
@@ -155,7 +193,9 @@ while true; do
     [[ ${ESCOLHA,,} == 'q' ]] && exit 0
     
     if [[ "$ESCOLHA" =~ ^[0-9]+$ ]]; then
-        DISCO=$(lsblk -d -n -o NAME | grep "disk" | sed -n "${ESCOLHA}p")
+        # 3. Selecionar pelo índice do array
+        INDEX=$((ESCOLHA - 1))
+        DISCO=${DISCOS[$INDEX]}
     else
         DISCO=$ESCOLHA
     fi
