@@ -121,11 +121,10 @@ get_unallocated_space() {
 
 header() {
     clear
-    echo "===================================================="
-    echo "   LINUX UNIVERSAL DISK EXPANDER v3.1.2"
+    echo "===================================================="    echo "   LINUX UNIVERSAL DISK EXPANDER v3.2.4-beta 🧪"
     echo "   Multi-Cloud & Virtual Environment Tool"
     echo "===================================================="
-    echo "   Criado por: Benicio Neto | Versão: 3.1.2
+    echo "   Criado por: Benicio Neto | Versão: 3.2.4-beta"
     echo "===================================================="
     echo
 }
