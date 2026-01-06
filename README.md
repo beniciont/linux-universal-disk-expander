@@ -17,7 +17,7 @@ Ferramenta universal para expansão segura de discos, partições e volumes LVM 
 Execute o comando abaixo como root:
 
 ```bash
-sudo bash -c "\$(curl -sSL https://bit.ly/beniciont-linux-universal-disk-expander)"
+sudo bash -c "$(curl -sSL https://bit.ly/beniciont-linux-universal-disk-expander)"
 ```
 
 ## 🛠️ Desenvolvimento
