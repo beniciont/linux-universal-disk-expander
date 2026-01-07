@@ -93,14 +93,10 @@ get_unallocated_space() {
         mount_point=$(lsblk -no MOUNTPOINT "$disk" | head -n1 | xargs)
         
         if [[ -n "$fstype" ]]; then
-            # Se estiver montado, o 'used' é o tamanho atual do FS via df
             if [[ -n "$mount_point" ]]; then
                 local df_size=$(df -B1 --output=size "$mount_point" | tail -n1 | xargs)
                 [[ -n "$df_size" ]] && used_bytes=$df_size
             else
-                # Se não estiver montado, tentamos blockdev, mas isso pode dar o tamanho do disco
-                # Em RAW, se não há partição, o FS ocupa o que o disco era antes.
-                # Como não temos histórico, usamos o blockdev como fallback.
                 used_bytes=$(sudo blockdev --getsize64 "$disk" 2>/dev/null)
             fi
         else
@@ -318,37 +314,47 @@ while true; do
         else
             MODO="RAW"
             ALVO_NOME="/dev/$DISCO"
-            # Em modo RAW, pulamos a seleção e vamos direto para a execução
+            header
+            echo "${YELLOW}🚀 PASSO 4: Execução da Expansão (MODO RAW)${RESET}"
+            echo "----------------------------------------------------"
+            echo -e "${GREEN}ℹ️ DISCO RAW DETECTADO: O sistema de arquivos será expandido para ocupar os ${TOTAL_GB}GB totais.${RESET}"
+            echo "  Alvo: $ALVO_NOME"
+            [[ -n "$PONTO_MONTAGEM" ]] && echo "  Montado em: $PONTO_MONTAGEM"
+            echo "----------------------------------------------------"
+            echo -n "${BLUE}Deseja prosseguir com a expansão total? (s/n): ${RESET}"
+            read CONFIRM_RAW
+            [[ ${CONFIRM_RAW,,} != 's' ]] && { echo "Operação cancelada."; sleep 2; break; }
+            VALOR_EXPANSAO="100%"
         fi
 
-        header
-        echo "${YELLOW}🚀 PASSO 4: Execução da Expansão${RESET}"
-        echo "----------------------------------------------------"
-        echo "  Alvo: $ALVO_NOME"
-        [[ -n "$ALVO_LVM" ]] && echo "  LVM Alvo: $ALVO_LVM"
-        echo "  Espaço Livre: ${LIVRE_GB} GB"
-        echo "----------------------------------------------------"
-        echo "  1) Expandir 100% (Total)"
-        echo "  2) Especificar um tamanho (ex: 500M, 1G)"
-        echo "  v) Voltar ao Passo anterior"
-        echo "----------------------------------------------------"
-        echo -n "${BLUE}Escolha uma opção: ${RESET}"
-        read OPT_EXP
-        
-        [[ ${OPT_EXP,,} == 'v' ]] && { ALVO_LVM=""; continue; }
-        
-        VALOR_EXPANSAO=""
-        case $OPT_EXP in
-            1) VALOR_EXPANSAO="100%" ;;
-            2) 
-                echo -n "${YELLOW}Digite o valor desejado (ex: 500M, 2G): ${RESET}"
-                read VALOR_EXPANSAO
-                [[ -z "$VALOR_EXPANSAO" ]] && { echo "Operação cancelada."; sleep 2; continue; }
-                ;;
-            *) echo "Opção inválida."; sleep 2; continue ;;
-        esac
-
         if [[ "$MODO" == "PART" ]]; then
+            header
+            echo "${YELLOW}🚀 PASSO 4: Execução da Expansão${RESET}"
+            echo "----------------------------------------------------"
+            echo "  Alvo: $ALVO_NOME"
+            [[ -n "$ALVO_LVM" ]] && echo "  LVM Alvo: $ALVO_LVM"
+            echo "  Espaço Livre: ${LIVRE_GB} GB"
+            echo "----------------------------------------------------"
+            echo "  1) Expandir 100% (Total)"
+            echo "  2) Especificar um tamanho (ex: 500M, 1G)"
+            echo "  v) Voltar ao Passo anterior"
+            echo "----------------------------------------------------"
+            echo -n "${BLUE}Escolha uma opção: ${RESET}"
+            read OPT_EXP
+            
+            [[ ${OPT_EXP,,} == 'v' ]] && { ALVO_LVM=""; continue; }
+            
+            VALOR_EXPANSAO=""
+            case $OPT_EXP in
+                1) VALOR_EXPANSAO="100%" ;;
+                2) 
+                    echo -n "${YELLOW}Digite o valor desejado (ex: 500M, 2G): ${RESET}"
+                    read VALOR_EXPANSAO
+                    [[ -z "$VALOR_EXPANSAO" ]] && { echo "Operação cancelada."; sleep 2; continue; }
+                    ;;
+                *) echo "Opção inválida."; sleep 2; continue ;;
+            esac
+
             progress 5 "Expandindo partição $ALVO_NOME via parted..."
             if [[ "$VALOR_EXPANSAO" == "100%" ]]; then
                 sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" 100%
