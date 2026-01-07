@@ -17,7 +17,7 @@
 # ==============================================================================
 
 # Configurações de Log
-LOG_FILE="/var/log/oci-expand.log"
+LOG_FILE="/var/log/linux-disk-expander-develop.log"
 USER_EXEC=$(whoami)
 
 # Cores seguras com tput
@@ -295,11 +295,32 @@ while true; do
     echo "----------------------------------------------------"
     echo -n "${BLUE}Deseja expandir 100% do espaço livre? (s/n): ${RESET}"
     read CONFIRM
-    [[ ${CONFIRM,,} != 's' ]] && { echo "Operação cancelada."; sleep 2; continue; }
+    
+    VALOR_EXPANSAO=""
+    if [[ ${CONFIRM,,} == 's' ]]; then
+        VALOR_EXPANSAO="100%"
+    else
+        echo -n "${YELLOW}Digite o valor desejado (ex: 500M, 2G): ${RESET}"
+        read VALOR_EXPANSAO
+        [[ -z "$VALOR_EXPANSAO" ]] && { echo "Operação cancelada."; sleep 2; continue; }
+    fi
 
     if [[ "$MODO" == "PART" ]]; then
         progress 5 "Expandindo partição $ALVO_NOME via parted..."
-        sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" 100%
+        if [[ "$VALOR_EXPANSAO" == "100%" ]]; then
+            sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" 100%
+        else
+            # Calcula o novo tamanho final para o parted (Tamanho Atual + Valor Desejado)
+            local current_end=$(sudo parted -s "/dev/$DISCO" unit b print | grep -E "^ $PART_NUM" | awk '{print $3}' | tr -d 'B')
+            local add_bytes=0
+            if [[ "$VALOR_EXPANSAO" =~ [Gg]$ ]]; then
+                add_bytes=$(echo "${VALOR_EXPANSAO%[Gg]*} * 1024 * 1024 * 1024" | bc)
+            elif [[ "$VALOR_EXPANSAO" =~ [Mm]$ ]]; then
+                add_bytes=$(echo "${VALOR_EXPANSAO%[Mm]*} * 1024 * 1024" | bc)
+            fi
+            local new_end=$((current_end + add_bytes))
+            sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" "${new_end}b"
+        fi
         sudo partprobe "/dev/$DISCO"
     fi
 
@@ -307,7 +328,11 @@ while true; do
         progress 5 "Expandindo Physical Volume (PV)..."
         sudo pvresize "$ALVO_NOME" >/dev/null 2>&1
         progress 5 "Expandindo Logical Volume (LV) $ALVO_LVM..."
-        sudo lvextend -l +100%FREE "$ALVO_LVM" >/dev/null 2>&1
+        if [[ "$VALOR_EXPANSAO" == "100%" ]]; then
+            sudo lvextend -l +100%FREE "$ALVO_LVM" >/dev/null 2>&1
+        else
+            sudo lvextend -L +"$VALOR_EXPANSAO" "$ALVO_LVM" >/dev/null 2>&1
+        fi
         ALVO_FINAL="$ALVO_LVM"
     else
         ALVO_FINAL="$ALVO_NOME"
