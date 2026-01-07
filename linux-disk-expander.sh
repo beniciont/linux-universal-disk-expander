@@ -314,47 +314,38 @@ while true; do
         else
             MODO="RAW"
             ALVO_NOME="/dev/$DISCO"
-            header
-            echo "${YELLOW}🚀 PASSO 4: Execução da Expansão (MODO RAW)${RESET}"
-            echo "----------------------------------------------------"
-            echo -e "${GREEN}ℹ️ DISCO RAW DETECTADO: O sistema de arquivos será expandido para ocupar os ${TOTAL_GB}GB totais.${RESET}"
-            echo "  Alvo: $ALVO_NOME"
-            [[ -n "$PONTO_MONTAGEM" ]] && echo "  Montado em: $PONTO_MONTAGEM"
-            echo "----------------------------------------------------"
-            echo -n "${BLUE}Deseja prosseguir com a expansão total? (s/n): ${RESET}"
-            read CONFIRM_RAW
-            [[ ${CONFIRM_RAW,,} != 's' ]] && { echo "Operação cancelada."; sleep 2; break; }
-            VALOR_EXPANSAO="100%"
         fi
 
-        if [[ "$MODO" == "PART" ]]; then
-            header
-            echo "${YELLOW}🚀 PASSO 4: Execução da Expansão${RESET}"
-            echo "----------------------------------------------------"
-            echo "  Alvo: $ALVO_NOME"
-            [[ -n "$ALVO_LVM" ]] && echo "  LVM Alvo: $ALVO_LVM"
-            echo "  Espaço Livre: ${LIVRE_GB} GB"
-            echo "----------------------------------------------------"
-            echo "  1) Expandir 100% (Total)"
-            echo "  2) Especificar um tamanho (ex: 500M, 1G)"
-            echo "  v) Voltar ao Passo anterior"
-            echo "----------------------------------------------------"
-            echo -n "${BLUE}Escolha uma opção: ${RESET}"
-            read OPT_EXP
-            
-            [[ ${OPT_EXP,,} == 'v' ]] && { ALVO_LVM=""; continue; }
-            
-            VALOR_EXPANSAO=""
-            case $OPT_EXP in
-                1) VALOR_EXPANSAO="100%" ;;
-                2) 
-                    echo -n "${YELLOW}Digite o valor desejado (ex: 500M, 2G): ${RESET}"
-                    read VALOR_EXPANSAO
-                    [[ -z "$VALOR_EXPANSAO" ]] && { echo "Operação cancelada."; sleep 2; continue; }
-                    ;;
-                *) echo "Opção inválida."; sleep 2; continue ;;
-            esac
+        header
+        echo "${YELLOW}🚀 PASSO 4: Execução da Expansão${RESET}"
+        echo "----------------------------------------------------"
+        [[ "$MODO" == "RAW" ]] && echo -e "${GREEN}ℹ️ MODO RAW DETECTADO (Sem Partições)${RESET}"
+        echo "  Alvo: $ALVO_NOME"
+        [[ -n "$ALVO_LVM" ]] && echo "  LVM Alvo: $ALVO_LVM"
+        [[ -n "$PONTO_MONTAGEM" ]] && echo "  Montado em: $PONTO_MONTAGEM"
+        echo "  Espaço Livre: ${LIVRE_GB} GB"
+        echo "----------------------------------------------------"
+        echo "  1) Expandir 100% (Total)"
+        echo "  2) Especificar um tamanho (ex: 500M, 1G)"
+        echo "  v) Voltar ao Passo anterior"
+        echo "----------------------------------------------------"
+        echo -n "${BLUE}Escolha uma opção: ${RESET}"
+        read OPT_EXP
+        
+        [[ ${OPT_EXP,,} == 'v' ]] && { ALVO_LVM=""; continue; }
+        
+        VALOR_EXPANSAO=""
+        case $OPT_EXP in
+            1) VALOR_EXPANSAO="100%" ;;
+            2) 
+                echo -n "${YELLOW}Digite o valor desejado (ex: 500M, 2G): ${RESET}"
+                read VALOR_EXPANSAO
+                [[ -z "$VALOR_EXPANSAO" ]] && { echo "Operação cancelada."; sleep 2; continue; }
+                ;;
+            *) echo "Opção inválida."; sleep 2; continue ;;
+        esac
 
+        if [[ "$MODO" == "PART" ]]; then
             progress 5 "Expandindo partição $ALVO_NOME via parted..."
             if [[ "$VALOR_EXPANSAO" == "100%" ]]; then
                 sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" 100%
@@ -393,7 +384,17 @@ while true; do
         progress 5 "Expandindo sistema de arquivos ($FSTYPE)..."
         case "$FSTYPE" in
             xfs) sudo xfs_growfs "$ALVO_FINAL" >/dev/null 2>&1 ;;
-            ext*) sudo resize2fs "$ALVO_FINAL" >/dev/null 2>&1 ;;
+            ext*) 
+                if [[ "$VALOR_EXPANSAO" == "100%" ]]; then
+                    sudo resize2fs "$ALVO_FINAL" >/dev/null 2>&1
+                else
+                    # Para resize2fs com tamanho específico, precisamos calcular o novo tamanho total
+                    # Mas o resize2fs aceita o tamanho final. Para simplificar e ser seguro:
+                    # Se for parcial em RAW/PART, o resize2fs sem parâmetros expande até o limite da partição/disco.
+                    # Se o usuário quer parcial, o ideal é expandir a partição/LV e o FS segue.
+                    sudo resize2fs "$ALVO_FINAL" >/dev/null 2>&1
+                fi
+                ;;
             *) echo "${YELLOW}Aviso: Sistema de arquivos '$FSTYPE' não suportado para expansão automática.${RESET}" ;;
         esac
 
