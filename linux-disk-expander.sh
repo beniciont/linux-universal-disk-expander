@@ -160,6 +160,24 @@ progress() {
     echo "  ${GREEN}✅ $msg... concluído.${RESET}"
 }
 
+# Função para calcular o novo tamanho da partição
+calculate_new_partition_end() {
+    local disk=$1
+    local part_num=$2
+    local value=$3
+    
+    local current_end=$(sudo parted -s "$disk" unit b print | grep -E "^ $part_num" | awk '{print $3}' | tr -d 'B')
+    local add_bytes=0
+    
+    if [[ "$value" =~ [Gg]$ ]]; then
+        add_bytes=$(echo "${value%[Gg]*} * 1024 * 1024 * 1024" | bc)
+    elif [[ "$value" =~ [Mm]$ ]]; then
+        add_bytes=$(echo "${value%[Mm]*} * 1024 * 1024" | bc)
+    fi
+    
+    echo $((current_end + add_bytes))
+}
+
 log_message "START" "Script Universal v3.2.0-beta iniciado."
 check_dependencies
 
@@ -332,15 +350,8 @@ while true; do
             if [[ "$VALOR_EXPANSAO" == "100%" ]]; then
                 sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" 100%
             else
-                local current_end=$(sudo parted -s "/dev/$DISCO" unit b print | grep -E "^ $PART_NUM" | awk '{print $3}' | tr -d 'B')
-                local add_bytes=0
-                if [[ "$VALOR_EXPANSAO" =~ [Gg]$ ]]; then
-                    add_bytes=$(echo "${VALOR_EXPANSAO%[Gg]*} * 1024 * 1024 * 1024" | bc)
-                elif [[ "$VALOR_EXPANSAO" =~ [Mm]$ ]]; then
-                    add_bytes=$(echo "${VALOR_EXPANSAO%[Mm]*} * 1024 * 1024" | bc)
-                fi
-                local new_end=$((current_end + add_bytes))
-                sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" "${new_end}b"
+                NEW_END=$(calculate_new_partition_end "/dev/$DISCO" "$PART_NUM" "$VALOR_EXPANSAO")
+                sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" "${NEW_END}b"
             fi
             sudo partprobe "/dev/$DISCO"
         fi
