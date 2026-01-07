@@ -9,7 +9,7 @@
 # HISTÓRICO DE VERSÕES:
 # 1.0.0 a 2.8.0 - Evolução focada em OCI.
 # 2.9.0-beta (03/01/2026) - NEW: Rescan agnóstico (OCI, Azure, AWS, VirtualBox).
-# 3.0.9 (05/01/2026) - FIX: Detecção de espaço livre interno no LVM (PFree), correção de bug na seleção de disco e remoção da opção 'Forçar'.
+# 3.0.9 (05/01/2026) - FIX: Detecção de espaço livre interno no LVM (PFree), correção de bug na seleção de disco, remoção da opção 'Forçar' e seleção de Logical Volume (LV).
 # ==============================================================================
 
 # Configurações de Log
@@ -293,10 +293,47 @@ while true; do
         MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | head -n1)
         TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | head -n1)
         
+        # Lógica de seleção de LV
         if lsblk -no FSTYPE "$ALVO_NOME" | grep -qi "LVM"; then
             HAS_LVM="yes"
-            REAL_LV=$(lsblk -ln -o NAME,TYPE "$ALVO_NOME" | grep "lvm" | head -n1 | awk '{print $1}')
-            [[ -n "$REAL_LV" ]] && ALVO_LVM="/dev/mapper/$REAL_LV" || ALVO_LVM=""
+            
+            # 1. Encontrar o Volume Group (VG)
+            VG_NAME=$(sudo vgs --noheadings -o vg_name "$ALVO_NOME" 2>/dev/null | xargs)
+            
+            if [[ -n "$VG_NAME" ]]; then
+                echo -e "\n${YELLOW}LVM DETECTADO: Volume Group '$VG_NAME'${RESET}"
+                
+                # 2. Listar Logical Volumes (LVs)
+                LVS=()
+                mapfile -t LVS_RAW < <(sudo lvs --noheadings -o lv_name,lv_size "$VG_NAME" 2>/dev/null | awk '{print $1 " (" $2 ")"}')
+                
+                if [ ${#LVS_RAW[@]} -gt 0 ]; then
+                    echo "----------------------------------------------------"
+                    echo "${BLUE}Selecione o Logical Volume (LV) para expansão:${RESET}"
+                    for i in "${!LVS_RAW[@]}"; do
+                        echo "  $((i+1))) ${LVS_RAW[$i]}"
+                    done
+                    echo "----------------------------------------------------"
+                    echo -n "Escolha o número do LV: "
+                    read LV_ESCOLHA_NUM
+                    
+                    if [[ "$LV_ESCOLHA_NUM" =~ ^[0-9]+$ ]] && [ "$LV_ESCOLHA_NUM" -ge 1 ] && [ "$LV_ESCOLHA_NUM" -le ${#LVS_RAW[@]} ]; then
+                        LV_SELECIONADO=$(echo "${LVS_RAW[$((LV_ESCOLHA_NUM - 1))]}" | cut -d' ' -f1)
+                        ALVO_LVM="/dev/mapper/$VG_NAME-$LV_SELECIONADO"
+                        echo -e "\n${GREEN}LV SELECIONADO: $ALVO_LVM${RESET}"
+                        
+                        # Atualiza MOUNT e TYPE para o LV selecionado
+                        MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_LVM" | head -n1)
+                        TYPE=$(lsblk -no FSTYPE "$ALVO_LVM" | head -n1)
+                    else
+                        echo "${RED}ERRO: Seleção de LV inválida!${RESET}"; sleep 2; continue 2
+                    fi
+                else
+                    echo "${RED}ERRO: Nenhum Logical Volume encontrado no VG '$VG_NAME'.${RESET}"; sleep 2; continue 2
+                fi
+            else
+                echo "${RED}ERRO: Não foi possível determinar o Volume Group (VG).${RESET}"; sleep 2; continue 2
+            fi
         else
             HAS_LVM="no"
             ALVO_LVM=""
@@ -307,10 +344,47 @@ while true; do
         MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_NOME" | head -n1)
         TYPE=$(lsblk -no FSTYPE "$ALVO_NOME" | head -n1)
         
+        # Lógica de seleção de LV para disco RAW (PV direto no disco)
         if lsblk -no FSTYPE "$ALVO_NOME" | grep -qi "LVM"; then
             HAS_LVM="yes"
-            REAL_LV=$(lsblk -ln -o NAME,TYPE "$ALVO_NOME" | grep "lvm" | head -n1 | awk '{print $1}')
-            [[ -n "$REAL_LV" ]] && ALVO_LVM="/dev/mapper/$REAL_LV" || ALVO_LVM=""
+            
+            # 1. Encontrar o Volume Group (VG)
+            VG_NAME=$(sudo vgs --noheadings -o vg_name "$ALVO_NOME" 2>/dev/null | xargs)
+            
+            if [[ -n "$VG_NAME" ]]; then
+                echo -e "\n${YELLOW}LVM DETECTADO: Volume Group '$VG_NAME'${RESET}"
+                
+                # 2. Listar Logical Volumes (LVs)
+                LVS=()
+                mapfile -t LVS_RAW < <(sudo lvs --noheadings -o lv_name,lv_size "$VG_NAME" 2>/dev/null | awk '{print $1 " (" $2 ")"}')
+                
+                if [ ${#LVS_RAW[@]} -gt 0 ]; then
+                    echo "----------------------------------------------------"
+                    echo "${BLUE}Selecione o Logical Volume (LV) para expansão:${RESET}"
+                    for i in "${!LVS_RAW[@]}"; do
+                        echo "  $((i+1))) ${LVS_RAW[$i]}"
+                    }
+                    echo "----------------------------------------------------"
+                    echo -n "Escolha o número do LV: "
+                    read LV_ESCOLHA_NUM
+                    
+                    if [[ "$LV_ESCOLHA_NUM" =~ ^[0-9]+$ ]] && [ "$LV_ESCOLHA_NUM" -ge 1 ] && [ "$LV_ESCOLHA_NUM" -le ${#LVS_RAW[@]} ]; then
+                        LV_SELECIONADO=$(echo "${LVS_RAW[$((LV_ESCOLHA_NUM - 1))]}" | cut -d' ' -f1)
+                        ALVO_LVM="/dev/mapper/$VG_NAME-$LV_SELECIONADO"
+                        echo -e "\n${GREEN}LV SELECIONADO: $ALVO_LVM${RESET}"
+                        
+                        # Atualiza MOUNT e TYPE para o LV selecionado
+                        MOUNT=$(lsblk -no MOUNTPOINT "$ALVO_LVM" | head -n1)
+                        TYPE=$(lsblk -no FSTYPE "$ALVO_LVM" | head -n1)
+                    else
+                        echo "${RED}ERRO: Seleção de LV inválida!${RESET}"; sleep 2; continue 2
+                    fi
+                else
+                    echo "${RED}ERRO: Nenhum Logical Volume encontrado no VG '$VG_NAME'.${RESET}"; sleep 2; continue 2
+                fi
+            else
+                echo "${RED}ERRO: Não foi possível determinar o Volume Group (VG).${RESET}"; sleep 2; continue 2
+            fi
         else
             HAS_LVM="no"
             ALVO_LVM=""
@@ -360,6 +434,7 @@ while true; do
 
     if [[ "$HAS_LVM" == "yes" ]]; then
         progress 5 "Atualizando LVM (PV e LV)..."
+        # O pvresize deve ser feito no PV que contém o espaço livre
         PV_TARGET=$(pvs --noheadings -o pv_name | grep "$DISCO" | head -n1 | xargs)
         [[ -z "$PV_TARGET" ]] && PV_TARGET="$ALVO_NOME"
         sudo pvresize "$PV_TARGET" >/dev/null 2>&1
