@@ -45,7 +45,7 @@ log_message() {
 
 # Função para instalar dependências
 check_dependencies() {
-    local deps=("gdisk" "parted" "xfsprogs" "e2fsprogs" "bc" "lvm2")
+    local deps=("parted" "xfsprogs" "e2fsprogs" "bc" "lvm2")
     
     for dep in "${deps[@]}"; do
         if ! command -v "$dep" &>/dev/null; then
@@ -71,9 +71,8 @@ get_unallocated_space() {
     local disk_name=$1
     local disk="/dev/$disk_name"
     
-    if command -v sgdisk &>/dev/null; then
-        sudo sgdisk -e "$disk" >/dev/null 2>&1
-    fi
+    # Corrige a tabela de partições se o disco cresceu (substituindo sgdisk por parted)
+    sudo parted -s "$disk" print >/dev/null 2>&1
 
     local disk_size_bytes=$(cat "/sys/block/$disk_name/size" 2>/dev/null)
     disk_size_bytes=$((disk_size_bytes * 512))
