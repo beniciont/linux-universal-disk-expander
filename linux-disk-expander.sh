@@ -1,18 +1,18 @@
 #!/bin/bash
 
 # ==============================================================================
-# LINUX UNIVERSAL DISK EXPANDER - MULTI-CLOUD & VIRTUAL
+# EXPANSOR DE DISCO UNIVERSAL LINUX - MULTI-NUVEM & VIRTUAL
 # Criado por: Benicio Neto
 # Versão: 3.1.2
 # Última Atualização: 04/01/2026
 #
 # HISTÓRICO DE VERSÕES:
 # 1.0.0 a 2.8.0 - Evolução focada em OCI.
-# 2.9.0-beta (03/01/2026) - NEW: Rescan agnóstico (OCI, Azure, AWS, VirtualBox).
-# 3.0.9 (05/01/2026) - FIX: Detecção de espaço livre interno no LVM (PFree) e correção de bug na seleção de disco.
-# 3.1.0 (04/01/2026) - REMOVE: Opção "Forçar". IMPROVE: Detecção inteligente de LVM e exibição de espaço disponível.
-# 3.1.1 (04/01/2026) - FIX: Detecção resiliente de LVM PFree e correção de dependências.
-# 3.1.2 (04/01/2026) - IMPROVE: Seleção numérica para partições e volumes LVM.
+# 2.9.0-beta (03/01/2026) - NOVO: Redetecção (Rescan) agnóstica (OCI, Azure, AWS, VirtualBox).
+# 3.0.9 (05/01/2026) - CORREÇÃO: Detecção de espaço livre interno no LVM (PFree) e correção de bug na seleção de disco.
+# 3.1.0 (04/01/2026) - REMOVIDO: Opção "Forçar". MELHORIA: Detecção inteligente de LVM e exibição de espaço disponível.
+# 3.1.1 (04/01/2026) - CORREÇÃO: Detecção resiliente de LVM PFree e correção de dependências.
+# 3.1.2 (04/01/2026) - MELHORIA: Seleção numérica para partições e volumes LVM.
 # ==============================================================================
 
 # Configurações de Log
@@ -121,8 +121,8 @@ get_unallocated_space() {
 
 header() {
     clear
-    echo "===================================================="    echo "   LINUX UNIVERSAL DISK EXPANDER v3.2.4-beta 🧪"
-    echo "   Multi-Cloud & Virtual Environment Tool"
+    echo "===================================================="    echo "   EXPANSOR DE DISCO UNIVERSAL LINUX v3.2.4-beta 🧪"
+    echo "   Ferramenta para Ambientes Multi-Nuvem e Virtuais"
     echo "===================================================="
     echo "   Criado por: Benicio Neto | Versão: 3.2.4-beta"
     echo "===================================================="
@@ -265,7 +265,7 @@ while true; do
         
         if lsblk -no FSTYPE "$ALVO_NOME" | grep -qi "LVM"; then
             HAS_LVM="yes"
-            echo -e "\n${YELLOW}Selecione o Logical Volume (LV) para expandir:${RESET}"
+            echo -e "\n${YELLOW}Selecione o Volume Lógico (LV) para expandir:${RESET}"
             LVS=()
             mapfile -t LVS < <(lsblk -ln -o NAME,TYPE "$ALVO_NOME" | grep "lvm" | awk '{print $1}')
             for i in "${!LVS[@]}"; do
@@ -295,7 +295,7 @@ while true; do
         
         if lsblk -no FSTYPE "$ALVO_NOME" | grep -qi "LVM"; then
             HAS_LVM="yes"
-            echo -e "\n${YELLOW}Selecione o Logical Volume (LV) para expandir:${RESET}"
+            echo -e "\n${YELLOW}Selecione o Volume Lógico (LV) para expandir:${RESET}"
             LVS=()
             mapfile -t LVS < <(lsblk -ln -o NAME,TYPE "$ALVO_NOME" | grep "lvm" | awk '{print $1}')
             for i in "${!LVS[@]}"; do

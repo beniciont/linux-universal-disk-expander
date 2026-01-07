@@ -8,7 +8,7 @@ Ferramenta universal para expansão segura de discos, partições e volumes LVM 
 
 ## 📋 Funcionalidades (v3.1.2 Estável)
 - **Rescan Inteligente**: Atualiza barramentos SCSI e sessões iSCSI automaticamente.
-- **Suporte LVM**: Detecção de espaço livre (PFree) e expansão de Logical Volumes.
+- **Suporte LVM**: Detecção de espaço livre (PFree) e expansão de Volumes Lógicos.
 - **Seleção Numérica**: Interface intuitiva para escolha de discos e partições.
 - **Segurança**: Validações de kernel e sistema de arquivos antes de qualquer alteração.
 
@@ -21,7 +21,7 @@ sudo bash -c "$(curl -sSL https://bit.ly/beniciont-linux-universal-disk-expander
 ```
 
 ## 🛠️ Desenvolvimento
-Para testar novas funcionalidades (NVMe, LUKS), utilize a branch \`develop\`:
+Para testar novas funcionalidades (NVMe, LUKS), utilize a branch de desenvolvimento (\`develop\`):
 \`https://bit.ly/beniciont-linux-universal-disk-expander-develop\`
 
 ---
