@@ -3,13 +3,14 @@
 # ==============================================================================
 # LINUX UNIVERSAL DISK EXPANDER - MULTI-CLOUD & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 3.0.9-beta (DESENVOLVIMENTO)
+# Versão: 3.2.0-beta (DESENVOLVIMENTO)
 # Última Atualização: 05/01/2026
 #
 # HISTÓRICO DE VERSÕES:
 # 1.0.0 a 2.8.0 - Evolução focada em OCI.
 # 2.9.0-beta (03/01/2026) - NEW: Rescan agnóstico (OCI, Azure, AWS, VirtualBox).
 # 3.0.9 (05/01/2026) - FIX: Detecção de espaço livre interno no LVM (PFree), correção de bug na seleção de disco, remoção da opção 'Forçar' e seleção de Logical Volume (LV).
+3.2.0-beta (06/01/2026) - Refinamento da lógica de expansão de LVM e preparação para testes de partição.
 # ==============================================================================
 
 # Configurações de Log

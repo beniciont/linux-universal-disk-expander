@@ -4,14 +4,15 @@
 > **ESTA É UMA VERSÃO DE DESENVOLVIMENTO (BETA).**
 > Use apenas para testes. Para produção, utilize a [branch main](https://github.com/beniciont/oci-linux-disk-expander/tree/main).
 
-[![Release](https://img.shields.io/github/v/release/beniciont/oci-linux-disk-expander?color=orange&label=Beta)](https://github.com/beniciont/oci-linux-disk-expander/tree/develop)
+[![Release](https://img.shields.io/github/v/release/beniciont/oci-linux-disk-expander?color=green&label=Estável)](https://github.com/beniciont/oci-linux-disk-expander/tree/main)
+[![Beta](https://img.shields.io/badge/Beta-v3.2.0-orange)](https://github.com/beniciont/oci-linux-disk-expander/tree/develop)
 [![License](https://img.shields.io/github/license/beniciont/oci-linux-disk-expander?color=blue)](LICENSE)
 
-Ferramenta universal e agnóstica para expansão de discos e partições em qualquer ambiente Linux (Cloud ou On-premise). Esta branch contém a versão **v3.0.9-beta**, focada em compatibilidade **Multi-Cloud** e **Virtualização**.
+Ferramenta universal e agnóstica para expansão de discos e partições em qualquer ambiente Linux (Cloud ou On-premise). Esta branch contém a versão **v3.2.0-beta**, focada em compatibilidade **Multi-Cloud** e **Virtualização**. A versão estável atual é a **v3.1.2**.
 
 ---
 
-## 🌟 Funcionalidades em Teste (v3.0.9-beta)
+## 🌟 Funcionalidades em Teste (v3.2.0-beta)
 
 - **Rescan Agnóstico:** Lógica inteligente para detectar novos espaços em **Proxmox, VMware, Hyper-V, Azure e AWS**.
 - **Detecção de Ambiente:** Identifica automaticamente se está em OCI ou outros provedores para aplicar o melhor método de rescan.
