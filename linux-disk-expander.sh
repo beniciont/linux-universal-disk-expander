@@ -293,24 +293,29 @@ while true; do
     [[ -n "$ALVO_LVM" ]] && echo "  LVM Alvo: $ALVO_LVM"
     echo "  Espaço Livre: ${LIVRE_GB} GB"
     echo "----------------------------------------------------"
-    echo -n "${BLUE}Deseja expandir 100% do espaço livre? (s/n): ${RESET}"
-    read CONFIRM
+    echo "  1) Expandir 100% (Total)"
+    echo "  2) Especificar um tamanho (ex: 500M, 1G)"
+    echo "  3) Cancelar e voltar"
+    echo "----------------------------------------------------"
+    echo -n "${BLUE}Escolha uma opção: ${RESET}"
+    read OPT_EXP
     
     VALOR_EXPANSAO=""
-    if [[ ${CONFIRM,,} == 's' ]]; then
-        VALOR_EXPANSAO="100%"
-    else
-        echo -n "${YELLOW}Digite o valor desejado (ex: 500M, 2G): ${RESET}"
-        read VALOR_EXPANSAO
-        [[ -z "$VALOR_EXPANSAO" ]] && { echo "Operação cancelada."; sleep 2; continue; }
-    fi
+    case $OPT_EXP in
+        1) VALOR_EXPANSAO="100%" ;;
+        2) 
+            echo -n "${YELLOW}Digite o valor desejado (ex: 500M, 2G): ${RESET}"
+            read VALOR_EXPANSAO
+            [[ -z "$VALOR_EXPANSAO" ]] && { echo "Operação cancelada."; sleep 2; continue; }
+            ;;
+        *) echo "Operação cancelada."; sleep 2; continue ;;
+    esac
 
     if [[ "$MODO" == "PART" ]]; then
         progress 5 "Expandindo partição $ALVO_NOME via parted..."
         if [[ "$VALOR_EXPANSAO" == "100%" ]]; then
             sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" 100%
         else
-            # Calcula o novo tamanho final para o parted (Tamanho Atual + Valor Desejado)
             local current_end=$(sudo parted -s "/dev/$DISCO" unit b print | grep -E "^ $PART_NUM" | awk '{print $3}' | tr -d 'B')
             local add_bytes=0
             if [[ "$VALOR_EXPANSAO" =~ [Gg]$ ]]; then
