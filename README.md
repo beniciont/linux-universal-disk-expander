@@ -7,11 +7,11 @@
 [![Release](https://img.shields.io/github/v/release/beniciont/oci-linux-disk-expander?color=orange&label=Beta)](https://github.com/beniciont/oci-linux-disk-expander/tree/develop)
 [![License](https://img.shields.io/github/license/beniciont/oci-linux-disk-expander?color=blue)](LICENSE)
 
-Ferramenta universal e agnóstica para expansão de discos e partições em qualquer ambiente Linux (Cloud ou On-premise). Esta branch contém a versão **v2.9.0-beta**, focada em compatibilidade **Multi-Cloud** e **Virtualização**.
+Ferramenta universal e agnóstica para expansão de discos e partições em qualquer ambiente Linux (Cloud ou On-premise). Esta branch contém a versão **v3.0.9-beta**, focada em compatibilidade **Multi-Cloud** e **Virtualização**.
 
 ---
 
-## 🌟 Funcionalidades em Teste (v2.9.0-beta)
+## 🌟 Funcionalidades em Teste (v3.0.9-beta)
 
 - **Rescan Agnóstico:** Lógica inteligente para detectar novos espaços em **Proxmox, VMware, Hyper-V, Azure e AWS**.
 - **Detecção de Ambiente:** Identifica automaticamente se está em OCI ou outros provedores para aplicar o melhor método de rescan.
@@ -25,7 +25,7 @@ Ferramenta universal e agnóstica para expansão de discos e partições em qual
 Execute o comando abaixo para testar as novas funcionalidades de rescan universal:
 
 ```bash
-sudo bash -c "$(curl -sSL https://raw.githubusercontent.com/beniciont/oci-linux-disk-expander/develop/oci-expand-disk.sh)"
+sudo bash -c "$(curl -sSL https://bit.ly/beniciont-linux-universal-disk-expander-develop)"
 ```
 
 ---

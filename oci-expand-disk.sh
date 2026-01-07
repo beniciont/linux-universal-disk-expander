@@ -3,7 +3,7 @@
 # ==============================================================================
 # LINUX UNIVERSAL DISK EXPANDER - MULTI-CLOUD & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 3.0.9 (DESENVOLVIMENTO)
+# Versão: 3.0.9-beta (DESENVOLVIMENTO)
 # Última Atualização: 05/01/2026
 #
 # HISTÓRICO DE VERSÕES:
