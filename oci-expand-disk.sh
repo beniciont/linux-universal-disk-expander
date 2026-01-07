@@ -9,7 +9,7 @@
 # HISTÓRICO DE VERSÕES:
 # 1.0.0 a 2.8.0 - Evolução focada em OCI.
 # 2.9.0-beta (03/01/2026) - NEW: Rescan agnóstico (OCI, Azure, AWS, VirtualBox).
-# 3.0.9 (05/01/2026) - FIX: Detecção de espaço livre interno no LVM (PFree) e correção de bug na seleção de disco.
+# 3.0.9 (05/01/2026) - FIX: Detecção de espaço livre interno no LVM (PFree), correção de bug na seleção de disco e remoção da opção 'Forçar'.
 # ==============================================================================
 
 # Configurações de Log
@@ -67,6 +67,7 @@ check_dependencies() {
 }
 
 # Função para obter o espaço não alocado
+# Retorna: [GB]:[SOURCE] (ex: 25.00:LVM_FREE)
 get_unallocated_space() {
     local disk_name=$1
     local disk="/dev/$disk_name"
@@ -80,28 +81,22 @@ get_unallocated_space() {
     
     local used_bytes=0
     local lvm_free_bytes=0
+    local source="DISK_GROWTH"
     
     local has_parts=$(lsblk -ln -o TYPE "$disk" | grep -q "part" && echo "yes" || echo "no")
     
     if [[ "$has_parts" == "yes" ]]; then
-        # Se houver partições, o espaço livre é o que sobrou no disco físico
-        # O parted printa o último setor usado, mas é mais fácil calcular o espaço livre
-        # comparando o tamanho total do disco com o tamanho da última partição.
-        # Para simplificar, vamos usar o tamanho total do disco menos o tamanho da última partição
-        # (que é a que será expandida)
+        # 1. Tenta calcular o espaço livre físico (crescimento do disco)
         local last_part_end_sector=$(sudo parted -s "$disk" unit s print | grep -E "^ [0-9]+" | tail -n1 | awk '{print $3}' | tr -d 's')
         local sector_size=512
         used_bytes=$((last_part_end_sector * sector_size))
         
-        # Detecção robusta de LVM PFree (se a última partição for um PV)
+        # 2. Tenta detectar o espaço livre interno do LVM (PFree)
         local last_part_name=$(lsblk -ln -o NAME,TYPE "$disk" | grep "part" | tail -n1 | awk '{print $1}')
         local pv_info=$(sudo pvs --noheadings --units b --options pv_size,pv_free "/dev/$last_part_name" 2>/dev/null | xargs)
         if [[ -n "$pv_info" ]]; then
-            local pv_size=$(echo "$pv_info" | awk '{print $1}' | grep -oE "[0-9]+")
             local pv_free=$(echo "$pv_info" | awk '{print $2}' | grep -oE "[0-9]+")
             lvm_free_bytes=$pv_free
-            # Se for LVM, o espaço livre físico é o que sobrou no disco, mas o espaço livre
-            # para o usuário é o PFree do PV, se o disco não tiver crescido.
         fi
     else
         # Se for disco RAW, o espaço livre é 0, a menos que seja um PV
@@ -122,15 +117,23 @@ get_unallocated_space() {
 
     local physical_free_bytes=$((disk_size_bytes - used_bytes))
     
-    # O espaço total livre é o maior entre o espaço físico não alocado e o espaço livre interno do LVM (PFree)
-    local total_free_bytes=$((physical_free_bytes > lvm_free_bytes ? physical_free_bytes : lvm_free_bytes))
+    # Determina a maior fonte de espaço livre
+    local total_free_bytes=0
+    if [[ "$lvm_free_bytes" -gt "$physical_free_bytes" ]]; then
+        total_free_bytes=$lvm_free_bytes
+        source="LVM_FREE"
+    else
+        total_free_bytes=$physical_free_bytes
+        source="DISK_GROWTH"
+    fi
     
-    log_message "DEBUG" "get_unallocated_space($disk): Total=$disk_size_bytes, Usado=$used_bytes, PFree_LVM=$lvm_free_bytes, Livre_Fisico=$physical_free_bytes, Livre_Total=$total_free_bytes"
+    log_message "DEBUG" "get_unallocated_space($disk): Total=$disk_size_bytes, Usado=$used_bytes, PFree_LVM=$lvm_free_bytes, Livre_Fisico=$physical_free_bytes, Livre_Total=$total_free_bytes, Fonte=$source"
 
     if [[ "$total_free_bytes" -lt 104857600 ]]; then # Menos de 100MB
-        echo "0"
+        echo "0:NONE"
     else
-        echo "scale=2; $total_free_bytes / 1024 / 1024 / 1024" | bc
+        local free_gb=$(echo "scale=2; $total_free_bytes / 1024 / 1024 / 1024" | bc)
+        echo "$free_gb:$source"
     fi
 }
 
@@ -177,7 +180,6 @@ while true; do
     
     # 1. Criar lista de discos de forma robusta
     DISCOS=()
-    # mapfile é mais robusto que o loop while read
     mapfile -t DISCOS < <(lsblk -d -n -o NAME,TYPE | grep "disk" | awk '{print $1}')
 
     echo "${YELLOW}📦 PASSO 1: Seleção de Disco Físico${RESET}"
@@ -231,26 +233,36 @@ while true; do
         sudo partprobe "/dev/$DISCO" >/dev/null 2>&1
         
         TAMANHO_ATUAL_HUMANO=$(lsblk -dno SIZE "/dev/$DISCO" | head -n1 | xargs)
-        ESPACO_LIVRE=$(get_unallocated_space "$DISCO")
+        
+        # Chama a função e separa o resultado
+        RESULTADO_ESPACO=$(get_unallocated_space "$DISCO")
+        ESPACO_LIVRE=$(echo "$RESULTADO_ESPACO" | cut -d':' -f1)
+        FONTE_ESPACO=$(echo "$RESULTADO_ESPACO" | cut -d':' -f2)
 
         if (( $(echo "$ESPACO_LIVRE > 0" | bc -l) )); then
+            
+            # Tradução da fonte do espaço
+            case "$FONTE_ESPACO" in
+                "LVM_FREE") FONTE_DISPLAY="Espaço Livre no LVM (PFree)" ;;
+                "DISK_GROWTH") FONTE_DISPLAY="Crescimento do Disco Físico" ;;
+                *) FONTE_DISPLAY="Espaço Não Alocado" ;;
+            esac
+
             echo -e "\n${GREEN}${BOLD}✅ SUCESSO! Espaço disponível detectado.${RESET}"
             echo "  Tamanho Atual do Disco: $TAMANHO_ATUAL_HUMANO"
-            echo "  Espaço para Expansão: ${ESPACO_LIVRE} GB"
+            echo "  Espaço para Expansão: ${ESPACO_LIVRE} GB (${FONTE_DISPLAY})"
             pause_nav && break || continue 2
         else
             echo -e "\n${RED}❌ AVISO: Nenhum espaço disponível para expansão.${RESET}"
             echo "  Tamanho Atual do Disco: $TAMANHO_ATUAL_HUMANO"
             echo "----------------------------------------------------"
             echo "  1) Tentar Rescan novamente"
-            echo "  2) Seguir mesmo assim (Forçar)"
             echo "  v) Voltar ao Passo 1"
             echo "----------------------------------------------------"
             echo -n "Opção: "
             read OPT
             case $OPT in
                 1) continue ;;
-                2) break ;;
                 v) continue 2 ;;
                 *) continue ;;
             esac
