@@ -68,11 +68,12 @@ check_dependencies() {
 }
 
 # Função para obter o espaço não alocado
+# Retorna: [TotalGB]:[UsedGB]:[FreeGB]:[Source]
 get_unallocated_space() {
     local disk_name=$1
     local disk="/dev/$disk_name"
     
-    # Corrige a tabela de partições se o disco cresceu (substituindo sgdisk por parted)
+    # Corrige a tabela de partições se o disco cresceu
     sudo parted -s "$disk" print >/dev/null 2>&1
 
     local disk_size_bytes=$(cat "/sys/block/$disk_name/size" 2>/dev/null)
@@ -119,14 +120,13 @@ get_unallocated_space() {
         source="DISK_GROWTH"
     fi
     
-    log_message "DEBUG" "get_unallocated_space($disk): Total=$disk_size_bytes, Usado=$used_bytes, PFree_LVM=$lvm_free_bytes, Livre_Fisico=$physical_free_bytes, Livre_Total=$total_free_bytes, Fonte=$source"
+    local total_gb=$(echo "scale=2; $disk_size_bytes / 1024 / 1024 / 1024" | bc)
+    local used_gb=$(echo "scale=2; $used_bytes / 1024 / 1024 / 1024" | bc)
+    local free_gb=$(echo "scale=2; $total_free_bytes / 1024 / 1024 / 1024" | bc)
 
-    if [[ "$total_free_bytes" -lt 104857600 ]]; then # Menos de 100MB
-        echo "0:NONE"
-    else
-        local free_gb=$(echo "scale=2; $total_free_bytes / 1024 / 1024 / 1024" | bc)
-        echo "$free_gb:$source"
-    fi
+    log_message "DEBUG" "get_unallocated_space($disk): Total=$total_gb GB, Usado=$used_gb GB, Livre=$free_gb GB, Fonte=$source"
+
+    echo "$total_gb:$used_gb:$free_gb:$source"
 }
 
 header() {
@@ -173,7 +173,7 @@ while true; do
     DISCOS=()
     mapfile -t DISCOS < <(lsblk -d -n -o NAME,TYPE | grep "disk" | awk '{print $1}')
 
-    echo "${YELLOW}📦 PASSO 1: Seleção de Disco Físico${RESET}"
+    echo "${YELLOW}📦 PASSO 1: Seleção de Disco (Block Device)${RESET}"
     echo "----------------------------------------------------"
     lsblk -d -n -o NAME,SIZE,TYPE,MODEL | grep "disk" | awk '{print "  " NR ") " $1 " " $2 " " $4}'
     echo "  q) Sair do script"
@@ -219,27 +219,31 @@ while true; do
 
         sudo partprobe "/dev/$DISCO" >/dev/null 2>&1
         
-        TAMANHO_ATUAL_HUMANO=$(lsblk -dno SIZE "/dev/$DISCO" | head -n1 | xargs)
-        
+        # Coleta dados detalhados de espaço
         RESULTADO_ESPACO=$(get_unallocated_space "$DISCO")
-        ESPACO_LIVRE=$(echo "$RESULTADO_ESPACO" | cut -d':' -f1)
-        FONTE_ESPACO=$(echo "$RESULTADO_ESPACO" | cut -d':' -f2)
+        TOTAL_GB=$(echo "$RESULTADO_ESPACO" | cut -d':' -f1)
+        USADO_GB=$(echo "$RESULTADO_ESPACO" | cut -d':' -f2)
+        LIVRE_GB=$(echo "$RESULTADO_ESPACO" | cut -d':' -f3)
+        FONTE_ESPACO=$(echo "$RESULTADO_ESPACO" | cut -d':' -f4)
 
-        if (( $(echo "$ESPACO_LIVRE > 0" | bc -l) )); then
+        echo -e "\n${CYAN}📊 Resumo de Espaço em /dev/$DISCO:${RESET}"
+        echo "  Tamanho Total (Kernel): ${TOTAL_GB} GB"
+        echo "  Espaço Alocado/Usado:   ${USADO_GB} GB"
+        echo "  Espaço Livre Detectado: ${LIVRE_GB} GB"
+        
+        if (( $(echo "$LIVRE_GB > 0.1" | bc -l) )); then
             case "$FONTE_ESPACO" in
                 "LVM_FREE") FONTE_DISPLAY="Espaço Livre no LVM (PFree)" ;;
                 "DISK_GROWTH") FONTE_DISPLAY="Crescimento do Disco Físico" ;;
                 *) FONTE_DISPLAY="Espaço Não Alocado" ;;
             esac
 
-            echo -e "\n${GREEN}${BOLD}✅ SUCESSO! Espaço disponível detectado.${RESET}"
-            echo "  Tamanho Atual do Disco: $TAMANHO_ATUAL_HUMANO"
-            echo "  Espaço Total para Expansão: ${ESPACO_LIVRE} GB"
+            echo -e "\n${GREEN}${BOLD}✅ SUCESSO! Espaço disponível para expansão.${RESET}"
             echo "  Fonte Detectada: $FONTE_DISPLAY"
             pause_nav && break || continue 2
         else
-            echo -e "\n${RED}❌ AVISO: Nenhum espaço disponível para expansão.${RESET}"
-            echo "  Tamanho Atual do Disco: $TAMANHO_ATUAL_HUMANO"
+            echo -e "\n${RED}❌ AVISO: Nenhum espaço novo detectado após o Rescan.${RESET}"
+            echo "  Certifique-se de que o disco foi expandido no Hipervisor/Nuvem."
             echo "----------------------------------------------------"
             echo "  1) Tentar Rescan novamente"
             echo "  v) Voltar ao Passo 1"
@@ -313,6 +317,5 @@ while true; do
 
     echo -e "\n${GREEN}🚀 Iniciando expansão de $ALVO_NOME...${RESET}"
     # Lógica de expansão simplificada para o exemplo
-    # ... (restante do script seguiria aqui)
     break
 done
