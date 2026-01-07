@@ -80,6 +80,7 @@ get_unallocated_space() {
     local used_bytes=0
     local lvm_free_bytes=0
     local source="DISK_GROWTH"
+    local mount_point=""
     
     local has_parts=$(lsblk -ln -o TYPE "$disk" | grep -q "part" && echo "yes" || echo "no")
     if [[ "$has_parts" == "yes" ]]; then
@@ -87,18 +88,29 @@ get_unallocated_space() {
         [[ -z "$last_part_end_sector" ]] && last_part_end_sector=0
         used_bytes=$((last_part_end_sector * 512))
     else
-        # Para discos RAW, verificamos o tamanho do sistema de arquivos
-        local fs_size_bytes=$(sudo blockdev --getsize64 "$disk" 2>/dev/null)
-        # Se for RAW, o 'used_bytes' inicial é o que o Kernel já reconhece como ocupado por FS
-        # Mas para detectar crescimento, precisamos comparar com o que o Kernel reporta agora
-        used_bytes=$(lsblk -bno SIZE "$disk" | head -n1 | xargs)
+        # Para discos RAW, verificamos se há sistema de arquivos e seu tamanho
+        local fstype=$(lsblk -no FSTYPE "$disk" | head -n1 | xargs)
+        mount_point=$(lsblk -no MOUNTPOINT "$disk" | head -n1 | xargs)
         
-        # Se o lsblk e o blockdev baterem, e não houver partição, 
-        # o 'used_bytes' para fins de expansão de FS deve ser o tamanho atual do FS
-        # Como não temos uma forma fácil de ver o tamanho do FS sem montar, 
-        # usamos a lógica de que se não há partição, o 'used' é o que o Kernel achava que era o disco antes.
-        # No entanto, para simplificar: em RAW, o 'used' é 0 para o cálculo de 'free' ser o disco todo.
-        used_bytes=0 
+        if [[ -n "$fstype" ]]; then
+            # Se houver FS, o 'used' é o tamanho que o FS ocupa atualmente
+            # Como o FS em modo RAW ocupa o dispositivo todo, 
+            # o 'used' real para o cálculo de expansão é o tamanho que o Kernel reportava ANTES do rescan.
+            # Mas para simplificar a exibição: mostramos o tamanho atual do FS via blockdev
+            used_bytes=$(sudo blockdev --getsize64 "$disk" 2>/dev/null)
+            
+            # No entanto, se o Kernel já atualizou o disk_size_bytes, 
+            # o physical_free_bytes daria 0. 
+            # Para detectar crescimento em RAW, precisamos de um histórico ou 
+            # assumir que se o FS é menor que o disco, há espaço.
+            # Vamos usar o 'df' se estiver montado, ou assumir 0 se não conseguirmos ler.
+            if [[ -n "$mount_point" ]]; then
+                local df_size=$(df -B1 --output=size "$mount_point" | tail -n1 | xargs)
+                [[ -n "$df_size" ]] && used_bytes=$df_size
+            fi
+        else
+            used_bytes=0
+        fi
     fi
 
     local pvs_found=$(lsblk -ln -o NAME,FSTYPE "$disk" | grep "LVM" | awk '{print $1}')
@@ -129,7 +141,7 @@ get_unallocated_space() {
     local used_gb=$(echo "scale=2; $used_bytes / 1024 / 1024 / 1024" | bc)
     local free_gb=$(echo "scale=2; $total_free_bytes / 1024 / 1024 / 1024" | bc)
 
-    echo "$total_gb:$used_gb:$free_gb:$source"
+    echo "$total_gb:$used_gb:$free_gb:$source:$mount_point"
 }
 
 header() {
@@ -211,7 +223,6 @@ while true; do
         if [ -d "/sys/class/scsi_host" ]; then
             for host in /sys/class/scsi_host/host*; do echo "- - -" | sudo tee "$host/scan" >/dev/null 2>&1; done
         fi
-        # Azure/Hyper-V específico
         if [ -d "/sys/class/scsi_device" ]; then
             for dev in /sys/class/scsi_device/*; do echo 1 | sudo tee "$dev/device/rescan" >/dev/null 2>&1; done
         fi
@@ -230,11 +241,13 @@ while true; do
         USADO_GB=$(echo "$RESULTADO_ESPACO" | cut -d':' -f2)
         LIVRE_GB=$(echo "$RESULTADO_ESPACO" | cut -d':' -f3)
         FONTE_ESPACO=$(echo "$RESULTADO_ESPACO" | cut -d':' -f4)
+        PONTO_MONTAGEM=$(echo "$RESULTADO_ESPACO" | cut -d':' -f5)
 
         echo -e "\n${CYAN}📊 Resumo de Espaço em /dev/$DISCO:${RESET}"
         echo "  Tamanho Total (Kernel): ${TOTAL_GB} GB"
         echo "  Espaço Alocado/Usado:   ${USADO_GB} GB"
         echo "  Espaço Livre Detectado: ${LIVRE_GB} GB"
+        [[ -n "$PONTO_MONTAGEM" ]] && echo "  Montado em:             ${GREEN}$PONTO_MONTAGEM${RESET}"
         
         if (( $(echo "$LIVRE_GB > 0.1" | bc -l) )); then
             case "$FONTE_ESPACO" in
