@@ -93,7 +93,14 @@ get_unallocated_space() {
         mount_point=$(lsblk -no MOUNTPOINT "$disk" | head -n1 | xargs)
         
         if [[ -n "$fstype" ]]; then
-            if [[ -n "$mount_point" ]]; then
+            if [[ "$fstype" == "LVM2_member" ]]; then
+                # Se for LVM RAW, o 'used' é o tamanho total do PV menos o PFree
+                if command -v pvs &>/dev/null; then
+                    local pv_size=$(sudo pvs --noheadings --units b --options pv_size "$disk" 2>/dev/null | grep -oE "[0-9]+")
+                    local pv_free=$(sudo pvs --noheadings --units b --options pv_free "$disk" 2>/dev/null | grep -oE "[0-9]+")
+                    [[ -n "$pv_size" && -n "$pv_free" ]] && used_bytes=$((pv_size - pv_free))
+                fi
+            elif [[ -n "$mount_point" ]]; then
                 local df_size=$(df -B1 --output=size "$mount_point" | tail -n1 | xargs)
                 [[ -n "$df_size" ]] && used_bytes=$df_size
             else
@@ -314,6 +321,28 @@ while true; do
         else
             MODO="RAW"
             ALVO_NOME="/dev/$DISCO"
+            # Se for RAW mas for LVM, precisamos tratar como LVM
+            if lsblk -no FSTYPE "$ALVO_NOME" | grep -qi "LVM"; then
+                HAS_LVM="yes"
+                while true; do
+                    header
+                    echo "${YELLOW}Selecione o Logical Volume (LV) para expandir (MODO RAW LVM):${RESET}"
+                    LVS=(); mapfile -t LVS < <(lsblk -ln -o NAME,TYPE "$ALVO_NOME" | grep "lvm" | awk '{print $1}')
+                    for i in "${!LVS[@]}"; do
+                        LV_SIZE=$(lsblk -no SIZE "/dev/mapper/${LVS[$i]}" 2>/dev/null || lsblk -no SIZE "/dev/${LVS[$i]}")
+                        echo "  $((i+1))) ${LVS[$i]} ($LV_SIZE)"
+                    done
+                    echo "  v) Voltar ao Passo 2"
+                    echo "----------------------------------------------------"
+                    echo -n "Escolha o número: "; read L_IDX
+                    [[ ${L_IDX,,} == 'v' ]] && break
+                    
+                    LV_ESCOLHIDO=${LVS[$((L_IDX-1))]}
+                    [[ -n "$LV_ESCOLHIDO" ]] && ALVO_LVM="/dev/mapper/$LV_ESCOLHIDO" || ALVO_LVM=""
+                    break
+                done
+                [[ ${L_IDX,,} == 'v' ]] && break
+            fi
         fi
 
         header
@@ -384,17 +413,7 @@ while true; do
         progress 5 "Expandindo sistema de arquivos ($FSTYPE)..."
         case "$FSTYPE" in
             xfs) sudo xfs_growfs "$ALVO_FINAL" >/dev/null 2>&1 ;;
-            ext*) 
-                if [[ "$VALOR_EXPANSAO" == "100%" ]]; then
-                    sudo resize2fs "$ALVO_FINAL" >/dev/null 2>&1
-                else
-                    # Para resize2fs com tamanho específico, precisamos calcular o novo tamanho total
-                    # Mas o resize2fs aceita o tamanho final. Para simplificar e ser seguro:
-                    # Se for parcial em RAW/PART, o resize2fs sem parâmetros expande até o limite da partição/disco.
-                    # Se o usuário quer parcial, o ideal é expandir a partição/LV e o FS segue.
-                    sudo resize2fs "$ALVO_FINAL" >/dev/null 2>&1
-                fi
-                ;;
+            ext*) sudo resize2fs "$ALVO_FINAL" >/dev/null 2>&1 ;;
             *) echo "${YELLOW}Aviso: Sistema de arquivos '$FSTYPE' não suportado para expansão automática.${RESET}" ;;
         esac
 
