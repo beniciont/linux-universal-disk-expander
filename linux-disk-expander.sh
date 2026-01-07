@@ -87,11 +87,18 @@ get_unallocated_space() {
         [[ -z "$last_part_end_sector" ]] && last_part_end_sector=0
         used_bytes=$((last_part_end_sector * 512))
     else
-        if lsblk -no FSTYPE "$disk" | grep -q "."; then
-            used_bytes=$disk_size_bytes
-        else
-            used_bytes=0
-        fi
+        # Para discos RAW, verificamos o tamanho do sistema de arquivos
+        local fs_size_bytes=$(sudo blockdev --getsize64 "$disk" 2>/dev/null)
+        # Se for RAW, o 'used_bytes' inicial é o que o Kernel já reconhece como ocupado por FS
+        # Mas para detectar crescimento, precisamos comparar com o que o Kernel reporta agora
+        used_bytes=$(lsblk -bno SIZE "$disk" | head -n1 | xargs)
+        
+        # Se o lsblk e o blockdev baterem, e não houver partição, 
+        # o 'used_bytes' para fins de expansão de FS deve ser o tamanho atual do FS
+        # Como não temos uma forma fácil de ver o tamanho do FS sem montar, 
+        # usamos a lógica de que se não há partição, o 'used' é o que o Kernel achava que era o disco antes.
+        # No entanto, para simplificar: em RAW, o 'used' é 0 para o cálculo de 'free' ser o disco todo.
+        used_bytes=0 
     fi
 
     local pvs_found=$(lsblk -ln -o NAME,FSTYPE "$disk" | grep "LVM" | awk '{print $1}')
@@ -200,9 +207,13 @@ while true; do
         progress 5 "Atualizando Kernel via sysfs..."
         [ -f "/sys/class/block/$DISCO/device/rescan" ] && echo 1 | sudo tee "/sys/class/block/$DISCO/device/rescan" >/dev/null 2>&1
         
+        progress 5 "Rescan de barramento SCSI (Agressivo)..."
         if [ -d "/sys/class/scsi_host" ]; then
-            progress 5 "Rescan de barramento SCSI..."
             for host in /sys/class/scsi_host/host*; do echo "- - -" | sudo tee "$host/scan" >/dev/null 2>&1; done
+        fi
+        # Azure/Hyper-V específico
+        if [ -d "/sys/class/scsi_device" ]; then
+            for dev in /sys/class/scsi_device/*; do echo 1 | sudo tee "$dev/device/rescan" >/dev/null 2>&1; done
         fi
 
         if command -v iscsiadm &>/dev/null; then
@@ -210,7 +221,9 @@ while true; do
             sudo iscsiadm -m node -R >/dev/null 2>&1 && sudo iscsiadm -m session -R >/dev/null 2>&1
         fi
 
+        sudo blockdev --rereadpt "/dev/$DISCO" >/dev/null 2>&1
         sudo partprobe "/dev/$DISCO" >/dev/null 2>&1
+        sudo udevadm settle
         
         RESULTADO_ESPACO=$(get_unallocated_space "$DISCO")
         TOTAL_GB=$(echo "$RESULTADO_ESPACO" | cut -d':' -f1)
@@ -298,6 +311,8 @@ while true; do
         else
             MODO="RAW"
             ALVO_NOME="/dev/$DISCO"
+            echo -e "\n${GREEN}ℹ️ MODO RAW DETECTADO: O disco não possui partições.${RESET}"
+            pause_nav || break
         fi
 
         header
@@ -360,7 +375,6 @@ while true; do
             ALVO_FINAL="$ALVO_NOME"
         fi
 
-        # Redetecção dinâmica do FSTYPE após a expansão da partição/LVM
         FSTYPE=$(lsblk -no FSTYPE "$ALVO_FINAL" | head -n1 | xargs)
         [[ -z "$FSTYPE" ]] && FSTYPE=$(sudo blkid -s TYPE -o value "$ALVO_FINAL")
         
