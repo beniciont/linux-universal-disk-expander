@@ -1,61 +1,35 @@
-# Linux Universal Disk Expander 🚀 (Branch: develop)
+# Linux Universal Disk Expander 🚀
 
-> [!WARNING]
-> **ESTA É UMA VERSÃO DE DESENVOLVIMENTO (BETA).**
-> Use apenas para testes. Para produção, utilize a [branch main](https://github.com/beniciont/oci-linux-disk-expander/tree/main).
+![Version](https://img.shields.io/badge/version-3.2.0--beta-orange)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Platform](https://img.shields.io/badge/platform-Linux-lightgrey)
 
-[![Release](https://img.shields.io/github/v/release/beniciont/oci-linux-disk-expander?color=green&label=Estável)](https://github.com/beniciont/oci-linux-disk-expander/tree/main)
-[![Beta](https://img.shields.io/badge/Beta-v3.2.0-orange)](https://github.com/beniciont/oci-linux-disk-expander/tree/develop)
-[![License](https://img.shields.io/github/license/beniciont/oci-linux-disk-expander?color=blue)](LICENSE)
+Ferramenta universal e agnóstica para expansão segura de discos, partições e volumes LVM em qualquer ambiente Linux (Cloud ou On-premise). Esta branch contém a versão **v3.2.0-beta**, focada em compatibilidade **Multi-Cloud** e **Virtualização**.
 
-Ferramenta universal e agnóstica para expansão de discos e partições em qualquer ambiente Linux (Cloud ou On-premise). Esta branch contém a versão **v3.2.0-beta**, focada em compatibilidade **Multi-Cloud** e **Virtualização**. A versão estável atual é a **v3.1.2**.
+## 📋 Funcionalidades em Teste (v3.2.0-beta)
+- **Rescan Agnóstico**: Lógica inteligente para detectar novos espaços em **Proxmox, VMware, Hyper-V, Azure e AWS**.
+- **Detecção de Ambiente**: Identifica automaticamente o provedor para aplicar o melhor método de Rescan.
+- **Bus Scan SCSI**: Varredura profunda de barramentos SCSI para hipervisores locais.
+- **Suporte LVM**: Detecção de espaço livre (PFree) e expansão de Logical Volumes (LVM).
+- **Seleção Numérica**: Interface intuitiva para escolha de discos e partições.
+- **Segurança**: Validações de kernel e sistema de arquivos antes de qualquer alteração.
 
----
+## 🧪 Como Testar (Versão Beta)
 
-## 🌟 Funcionalidades em Teste (v3.2.0-beta)
-
-- **Rescan Agnóstico:** Lógica inteligente para detectar novos espaços em **Proxmox, VMware, Hyper-V, Azure e AWS**.
-- **Detecção de Ambiente:** Identifica automaticamente se está em OCI ou outros provedores para aplicar o melhor método de rescan.
-- **Bus Scan SCSI:** Varredura profunda de barramentos SCSI para hipervisores locais.
-- **Tudo da v2.8.0:** Inclui todas as melhorias de expansão personalizada e precisão de setores.
-
----
-
-## 🧪 Como Testar (Execução Beta)
-
-Execute o comando abaixo para testar as novas funcionalidades de rescan universal:
+Execute o comando abaixo para testar as novas funcionalidades de Rescan universal:
 
 ```bash
 sudo bash -c "$(curl -sSL https://bit.ly/beniciont-linux-universal-disk-expander-develop)"
 ```
 
----
+## 🚀 Versão Estável (v3.1.2)
+Para a versão de produção, utilize:
+```bash
+sudo bash -c "$(curl -sSL https://bit.ly/beniciont-linux-universal-disk-expander)"
+```
 
-## 🛠️ Suporte Experimental
-
-| Ambiente | Status | Método de Rescan |
-| :--- | :--- | :--- |
-| **Oracle Cloud (OCI)** | ✅ Estável | iSCSI + sysfs |
-| **Proxmox / KVM** | 🧪 Beta | SCSI Bus Scan |
-| **VMware / VirtualBox** | 🧪 Beta | SCSI Bus Scan + sysfs |
-| **Azure / AWS** | 🧪 Beta | sysfs + sgdisk |
+## 🛠️ Desenvolvimento
+Para contribuir ou reportar problemas, utilize a branch de desenvolvimento (`develop`).
 
 ---
-
-## 📝 Documentação de Desenvolvimento
-
-Para detalhes técnicos sobre como contribuir ou o que está sendo testado, veja o arquivo [DEVELOPMENT.md](DEVELOPMENT.md).
-
----
-
-## 👨‍💻 Autor
-
-**Benicio Neto**
-- GitHub: [@beniciont](https://github.com/beniciont)
-- LinkedIn: [Benicio Neto](https://www.linkedin.com/in/benicioneto/)
-
----
-
-## 📄 Licença
-
-Este projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
+Criado por **Benicio Neto**
