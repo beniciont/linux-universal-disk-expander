@@ -88,25 +88,20 @@ get_unallocated_space() {
         [[ -z "$last_part_end_sector" ]] && last_part_end_sector=0
         used_bytes=$((last_part_end_sector * 512))
     else
-        # Para discos RAW, verificamos se há sistema de arquivos e seu tamanho
+        # Para discos RAW, verificamos se há sistema de arquivos e seu tamanho real
         local fstype=$(lsblk -no FSTYPE "$disk" | head -n1 | xargs)
         mount_point=$(lsblk -no MOUNTPOINT "$disk" | head -n1 | xargs)
         
         if [[ -n "$fstype" ]]; then
-            # Se houver FS, o 'used' é o tamanho que o FS ocupa atualmente
-            # Como o FS em modo RAW ocupa o dispositivo todo, 
-            # o 'used' real para o cálculo de expansão é o tamanho que o Kernel reportava ANTES do rescan.
-            # Mas para simplificar a exibição: mostramos o tamanho atual do FS via blockdev
-            used_bytes=$(sudo blockdev --getsize64 "$disk" 2>/dev/null)
-            
-            # No entanto, se o Kernel já atualizou o disk_size_bytes, 
-            # o physical_free_bytes daria 0. 
-            # Para detectar crescimento em RAW, precisamos de um histórico ou 
-            # assumir que se o FS é menor que o disco, há espaço.
-            # Vamos usar o 'df' se estiver montado, ou assumir 0 se não conseguirmos ler.
+            # Se estiver montado, o 'used' é o tamanho atual do FS via df
             if [[ -n "$mount_point" ]]; then
                 local df_size=$(df -B1 --output=size "$mount_point" | tail -n1 | xargs)
                 [[ -n "$df_size" ]] && used_bytes=$df_size
+            else
+                # Se não estiver montado, tentamos blockdev, mas isso pode dar o tamanho do disco
+                # Em RAW, se não há partição, o FS ocupa o que o disco era antes.
+                # Como não temos histórico, usamos o blockdev como fallback.
+                used_bytes=$(sudo blockdev --getsize64 "$disk" 2>/dev/null)
             fi
         else
             used_bytes=0
@@ -245,8 +240,8 @@ while true; do
 
         echo -e "\n${CYAN}📊 Resumo de Espaço em /dev/$DISCO:${RESET}"
         echo "  Tamanho Total (Kernel): ${TOTAL_GB} GB"
-        echo "  Espaço Alocado/Usado:   ${USADO_GB} GB"
-        echo "  Espaço Livre Detectado: ${LIVRE_GB} GB"
+        echo "  Tamanho Atual do FS:    ${USADO_GB} GB"
+        echo "  Espaço Livre p/ Ganhar: ${LIVRE_GB} GB"
         [[ -n "$PONTO_MONTAGEM" ]] && echo "  Montado em:             ${GREEN}$PONTO_MONTAGEM${RESET}"
         
         if (( $(echo "$LIVRE_GB > 0.1" | bc -l) )); then
@@ -275,14 +270,13 @@ while true; do
     done
 
     while true; do
-        header
-        echo "${CYAN}🔍 PASSO 3: Estrutura Detectada${RESET}"
-        echo "----------------------------------------------------"
-        lsblk "/dev/$DISCO" -o NAME,FSTYPE,SIZE,MOUNTPOINT,TYPE
-        echo "----------------------------------------------------"
-
         HAS_PART=$(lsblk -ln -o TYPE "/dev/$DISCO" | grep -q "part" && echo "yes" || echo "no")
         if [[ "$HAS_PART" == "yes" ]]; then
+            header
+            echo "${CYAN}🔍 PASSO 3: Estrutura Detectada${RESET}"
+            echo "----------------------------------------------------"
+            lsblk "/dev/$DISCO" -o NAME,FSTYPE,SIZE,MOUNTPOINT,TYPE
+            echo "----------------------------------------------------"
             MODO="PART"
             echo -e "\n${BLUE}Selecione a partição alvo:${RESET}"
             PARTS=(); mapfile -t PARTS < <(lsblk -ln -o NAME,TYPE "/dev/$DISCO" | grep "part" | awk '{print $1}')
@@ -324,8 +318,7 @@ while true; do
         else
             MODO="RAW"
             ALVO_NOME="/dev/$DISCO"
-            echo -e "\n${GREEN}ℹ️ MODO RAW DETECTADO: O disco não possui partições.${RESET}"
-            pause_nav || break
+            # Em modo RAW, pulamos a seleção e vamos direto para a execução
         fi
 
         header
@@ -337,7 +330,7 @@ while true; do
         echo "----------------------------------------------------"
         echo "  1) Expandir 100% (Total)"
         echo "  2) Especificar um tamanho (ex: 500M, 1G)"
-        echo "  v) Voltar ao Passo 3"
+        echo "  v) Voltar ao Passo anterior"
         echo "----------------------------------------------------"
         echo -n "${BLUE}Escolha uma opção: ${RESET}"
         read OPT_EXP
