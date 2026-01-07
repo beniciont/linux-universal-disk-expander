@@ -332,7 +332,6 @@ while true; do
             if [[ "$VALOR_EXPANSAO" == "100%" ]]; then
                 sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" 100%
             else
-                # Cálculo direto sem 'local' para evitar erros via pipe
                 CUR_END=$(sudo parted -s "/dev/$DISCO" unit b print | grep -E "^ $PART_NUM" | awk '{print $3}' | tr -d 'B')
                 ADD_B=0
                 if [[ "$VALOR_EXPANSAO" =~ [Gg]$ ]]; then
@@ -344,6 +343,7 @@ while true; do
                 sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" "${NEW_END}b"
             fi
             sudo partprobe "/dev/$DISCO"
+            sudo udevadm settle
         fi
 
         if [[ -n "$ALVO_LVM" ]]; then
@@ -360,12 +360,15 @@ while true; do
             ALVO_FINAL="$ALVO_NOME"
         fi
 
-        FSTYPE=$(lsblk -no FSTYPE "$ALVO_FINAL" | head -n1)
+        # Redetecção dinâmica do FSTYPE após a expansão da partição/LVM
+        FSTYPE=$(lsblk -no FSTYPE "$ALVO_FINAL" | head -n1 | xargs)
+        [[ -z "$FSTYPE" ]] && FSTYPE=$(sudo blkid -s TYPE -o value "$ALVO_FINAL")
+        
         progress 5 "Expandindo sistema de arquivos ($FSTYPE)..."
         case "$FSTYPE" in
             xfs) sudo xfs_growfs "$ALVO_FINAL" >/dev/null 2>&1 ;;
             ext*) sudo resize2fs "$ALVO_FINAL" >/dev/null 2>&1 ;;
-            *) echo "${YELLOW}Aviso: Sistema de arquivos $FSTYPE não suportado para expansão automática.${RESET}" ;;
+            *) echo "${YELLOW}Aviso: Sistema de arquivos '$FSTYPE' não suportado para expansão automática.${RESET}" ;;
         esac
 
         echo -e "\n${GREEN}${BOLD}🎉 SUCESSO! Expansão concluída.${RESET}"
