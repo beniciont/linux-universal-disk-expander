@@ -3,8 +3,8 @@
 # ==============================================================================
 # EXPANSOR DE DISCO UNIVERSAL LINUX - MULTI-NUVEM & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 3.2.6-beta (DESENVOLVIMENTO)
-# Última Atualização: 08/01/2026 (Fix: Incremental RAW Expansion)
+# Versão: 3.2.7-beta (DESENVOLVIMENTO)
+# Última Atualização: 08/01/2026 (Fix: EXT4 Error Handling & Version Bump)
 # ==============================================================================
 
 # Configurações de Log
@@ -127,10 +127,10 @@ get_unallocated_space() {
 header() {
     clear
     echo "===================================================="
-    echo "   EXPANSOR DE DISCO UNIVERSAL LINUX v3.2.6-beta 🧪"
+    echo "   EXPANSOR DE DISCO UNIVERSAL LINUX v3.2.7-beta 🧪"
     echo "   Ferramenta para Ambientes Multi-Nuvem e Virtuais"
     echo "===================================================="
-    echo "   Criado por: Benicio Neto | Versão: 3.2.6-beta"
+    echo "   Criado por: Benicio Neto | Versão: 3.2.7-beta"
     echo "===================================================="
     echo
 }
@@ -414,10 +414,12 @@ while true; do
                     sudo resize2fs "$ALVO_FINAL" "$VALOR_EXPANSAO"
                 fi
                 
-                if [ $? -ne 0 ]; then
-                    log_message "ERROR" "Falha ao expandir o sistema de arquivos EXT4 em $ALVO_FINAL"
+                local RESIZE_RET=$?
+                if [ $RESIZE_RET -ne 0 ]; then
+                    log_message "ERROR" "Falha ao expandir o sistema de arquivos EXT4 em $ALVO_FINAL (Exit Code: $RESIZE_RET)"
                     echo -e "\n${RED}❌ ERRO: Falha ao expandir o sistema de arquivos EXT4.${RESET}"
-                    echo "Verifique se o sistema de arquivos possui erros ou se o tamanho solicitado é válido."
+                    echo "O comando resize2fs retornou erro. Verifique as mensagens acima."
+                    echo "Possíveis causas: sistema de arquivos sujo (rode e2fsck manualmente) ou erro de redimensionamento online."
                     pause_nav
                     continue 2
                 fi
