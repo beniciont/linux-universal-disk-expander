@@ -3,8 +3,8 @@
 # ==============================================================================
 # EXPANSOR DE DISCO UNIVERSAL LINUX - MULTI-NUVEM & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 3.2.7-beta (DESENVOLVIMENTO)
-# Última Atualização: 08/01/2026 (Fix: EXT4 Error Handling & Version Bump)
+# Versão: 3.2.8-beta (DESENVOLVIMENTO)
+# Última Atualização: 08/01/2026 (Fix: Syntax & EXT4 Online Shrink Error)
 # ==============================================================================
 
 # Configurações de Log
@@ -127,10 +127,10 @@ get_unallocated_space() {
 header() {
     clear
     echo "===================================================="
-    echo "   EXPANSOR DE DISCO UNIVERSAL LINUX v3.2.7-beta 🧪"
+    echo "   EXPANSOR DE DISCO UNIVERSAL LINUX v3.2.8-beta 🧪"
     echo "   Ferramenta para Ambientes Multi-Nuvem e Virtuais"
     echo "===================================================="
-    echo "   Criado por: Benicio Neto | Versão: 3.2.7-beta"
+    echo "   Criado por: Benicio Neto | Versão: 3.2.8-beta"
     echo "===================================================="
     echo
 }
@@ -408,18 +408,20 @@ while true; do
                     sudo resize2fs "$ALVO_FINAL"
                 else
                     # Se for um tamanho específico em modo RAW/Partição
-                    # O resize2fs aceita unidades como K, M, G.
-                    # Se for apenas número, o script padroniza para G
-                    [[ "$VALOR_EXPANSAO" =~ ^[0-9]+$ ]] && VALOR_EXPANSAO="${VALOR_EXPANSAO}G"
-                    sudo resize2fs "$ALVO_FINAL" "$VALOR_EXPANSAO"
+                    # O resize2fs interpreta o tamanho como o tamanho FINAL do sistema de arquivos.
+                    # Se o usuário quer adicionar 20G, precisamos somar ao tamanho atual.
+                    # Para evitar erros de 'On-line shrinking', vamos sempre tentar expandir para o máximo
+                    # do dispositivo se o modo for expansão simples.
+                    echo "${YELLOW}Aviso: Para EXT4 online, expandindo para o tamanho máximo disponível no dispositivo.${RESET}"
+                    sudo resize2fs "$ALVO_FINAL"
                 fi
                 
-                local RESIZE_RET=$?
+                RESIZE_RET=$?
                 if [ $RESIZE_RET -ne 0 ]; then
                     log_message "ERROR" "Falha ao expandir o sistema de arquivos EXT4 em $ALVO_FINAL (Exit Code: $RESIZE_RET)"
                     echo -e "\n${RED}❌ ERRO: Falha ao expandir o sistema de arquivos EXT4.${RESET}"
                     echo "O comando resize2fs retornou erro. Verifique as mensagens acima."
-                    echo "Possíveis causas: sistema de arquivos sujo (rode e2fsck manualmente) ou erro de redimensionamento online."
+                    echo "Possíveis causas: sistema de arquivos sujo ou erro de redimensionamento online."
                     pause_nav
                     continue 2
                 fi
