@@ -3,8 +3,8 @@
 # ==============================================================================
 # EXPANSOR DE DISCO UNIVERSAL LINUX - MULTI-NUVEM & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 3.2.5-beta (DESENVOLVIMENTO)
-# Última Atualização: 08/01/2026
+# Versão: 3.2.6-beta (DESENVOLVIMENTO)
+# Última Atualização: 08/01/2026 (Fix: Incremental RAW Expansion)
 # ==============================================================================
 
 # Configurações de Log
@@ -128,10 +128,10 @@ get_unallocated_space() {
 header() {
     clear
     echo "===================================================="
-    echo "   EXPANSOR DE DISCO UNIVERSAL LINUX v3.2.5-beta 🧪"
+    echo "   EXPANSOR DE DISCO UNIVERSAL LINUX v3.2.6-beta 🧪"
     echo "   Ferramenta para Ambientes Multi-Nuvem e Virtuais"
     echo "===================================================="
-    echo "   Criado por: Benicio Neto | Versão: 3.2.5-beta"
+    echo "   Criado por: Benicio Neto | Versão: 3.2.6-beta"
     echo "===================================================="
     echo
 }
@@ -160,7 +160,7 @@ progress() {
     echo "  ${GREEN}✅ $msg... concluído.${RESET}"
 }
 
-log_message "START" "Script Universal v3.2.5-beta iniciado."
+log_message "START" "Script Universal v3.2.6-beta iniciado."
 check_dependencies
 
 while true; do
