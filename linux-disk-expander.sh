@@ -415,22 +415,11 @@ while true; do
                 fi
                 
                 if [ $? -ne 0 ]; then
+                    log_message "ERROR" "Falha ao expandir o sistema de arquivos EXT4 em $ALVO_FINAL"
                     echo -e "\n${RED}❌ ERRO: Falha ao expandir o sistema de arquivos EXT4.${RESET}"
-                    echo "Tentando verificar integridade do sistema de arquivos..."
-                    # Se estiver montado, não podemos rodar e2fsck -f
-                    if mountpoint -q "$PONTO_MONTAGEM" 2>/dev/null; then
-                        echo "O sistema de arquivos está montado. Tente desmontar e rodar o script novamente se o erro persistir."
-                    else
-                        sudo e2fsck -fy "$ALVO_FINAL"
-                        sudo resize2fs "$ALVO_FINAL"
-                    fi
-                    
-                    if [ $? -ne 0 ]; then
-                        log_message "ERROR" "Falha crítica na expansão EXT4 de $ALVO_FINAL"
-                        echo "${RED}Falha crítica. A expansão não foi concluída.${RESET}"
-                        pause_nav
-                        continue 2
-                    fi
+                    echo "Verifique se o sistema de arquivos possui erros ou se o tamanho solicitado é válido."
+                    pause_nav
+                    continue 2
                 fi
                 ;;
             *) echo "${YELLOW}Aviso: Sistema de arquivos '$FSTYPE' não suportado para expansão automática.${RESET}" ;;
