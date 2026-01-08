@@ -4,16 +4,7 @@
 # EXPANSOR DE DISCO UNIVERSAL LINUX - MULTI-NUVEM & VIRTUAL
 # Criado por: Benicio Neto
 # Versão: 3.2.5-beta (DESENVOLVIMENTO)
-# Última Atualização: 06/01/2026
-#
-# HISTÓRICO DE VERSÕES:
-# 1.0.0 a 2.8.0 - Evolução focada em OCI.
-# 2.9.0-beta (03/01/2026) - NEW: Rescan agnóstico (OCI, Azure, AWS, VirtualBox).
-# 3.0.9 (05/01/2026) - FIX: Detecção de espaço livre interno no LVM (PFree) e correção de bug na seleção de disco.
-# 3.1.0 (04/01/2026) - REMOVE: Opção "Forçar". IMPROVE: Detecção inteligente de LVM e exibição de espaço disponível.
-# 3.1.1 (04/01/2026) - FIX: Detecção resiliente de LVM PFree e correção de dependências.
-# 3.1.2 (04/01/2026) - IMPROVE: Seleção numérica para partições e volumes LVM.
-# 3.2.0-beta (06/01/2026) - Refinamento da lógica de expansão de LVM e preparação para testes de partição.
+# Última Atualização: 08/01/2026
 # ==============================================================================
 
 # Configurações de Log
@@ -57,12 +48,6 @@ check_dependencies() {
                 sudo apt-get update >/dev/null 2>&1
                 sudo apt-get install -y "$dep" >/dev/null 2>&1
             fi
-            
-            if ! command -v "$dep" &>/dev/null; then
-                log_message "ERROR" "Falha ao instalar a dependência '$dep'. O script pode não funcionar corretamente."
-            else
-                log_message "INFO" "Dependência '$dep' instalada com sucesso."
-            fi
         fi
     done
 }
@@ -88,13 +73,11 @@ get_unallocated_space() {
         [[ -z "$last_part_end_sector" ]] && last_part_end_sector=0
         used_bytes=$((last_part_end_sector * 512))
     else
-        # Para discos RAW, verificamos se há sistema de arquivos e seu tamanho real
         local fstype=$(lsblk -no FSTYPE "$disk" | head -n1 | xargs)
         mount_point=$(lsblk -no MOUNTPOINT "$disk" | head -n1 | xargs)
         
         if [[ -n "$fstype" ]]; then
             if [[ "$fstype" == "LVM2_member" ]]; then
-                # Se for LVM RAW, o 'used' é o tamanho total do PV menos o PFree
                 if command -v pvs &>/dev/null; then
                     local pv_size=$(sudo pvs --noheadings --units b --options pv_size "$disk" 2>/dev/null | grep -oE "[0-9]+")
                     local pv_free=$(sudo pvs --noheadings --units b --options pv_free "$disk" 2>/dev/null | grep -oE "[0-9]+")
@@ -274,6 +257,7 @@ while true; do
 
     while true; do
         HAS_PART=$(lsblk -ln -o TYPE "/dev/$DISCO" | grep -q "part" && echo "yes" || echo "no")
+        ALVO_LVM=""
         if [[ "$HAS_PART" == "yes" ]]; then
             header
             echo "${CYAN}🔍 PASSO 3: Estrutura Detectada${RESET}"
@@ -321,7 +305,6 @@ while true; do
         else
             MODO="RAW"
             ALVO_NOME="/dev/$DISCO"
-            # Se for RAW mas for LVM, precisamos tratar como LVM
             if lsblk -no FSTYPE "$ALVO_NOME" | grep -qi "LVM"; then
                 HAS_LVM="yes"
                 while true; do
@@ -385,6 +368,8 @@ while true; do
                     ADD_B=$(echo "${VALOR_EXPANSAO%[Gg]*} * 1024 * 1024 * 1024" | bc)
                 elif [[ "$VALOR_EXPANSAO" =~ [Mm]$ ]]; then
                     ADD_B=$(echo "${VALOR_EXPANSAO%[Mm]*} * 1024 * 1024" | bc)
+                elif [[ "$VALOR_EXPANSAO" =~ ^[0-9]+$ ]]; then
+                    ADD_B=$(echo "$VALOR_EXPANSAO * 1024 * 1024 * 1024" | bc)
                 fi
                 NEW_END=$((CUR_END + ADD_B))
                 sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" "${NEW_END}b"
@@ -400,6 +385,8 @@ while true; do
             if [[ "$VALOR_EXPANSAO" == "100%" ]]; then
                 sudo lvextend -l +100%FREE "$ALVO_LVM" >/dev/null 2>&1
             else
+                # Se for apenas número, assume G
+                [[ "$VALOR_EXPANSAO" =~ ^[0-9]+$ ]] && VALOR_EXPANSAO="${VALOR_EXPANSAO}G"
                 sudo lvextend -L +"$VALOR_EXPANSAO" "$ALVO_LVM" >/dev/null 2>&1
             fi
             ALVO_FINAL="$ALVO_LVM"
@@ -413,31 +400,35 @@ while true; do
         progress 5 "Expandindo sistema de arquivos ($FSTYPE)..."
         case "$FSTYPE" in
             xfs) 
-                # XFS sempre expande para o máximo do dispositivo/volume atual.
-                # Se for LVM ou Partição, o tamanho já foi limitado na camada anterior.
                 sudo xfs_growfs "$ALVO_FINAL" >/dev/null 2>&1 
                 ;;
             ext*) 
-                # Validação de unidade: se o usuário digitar apenas números, assume 'G'
-                if [[ "$VALOR_EXPANSAO" =~ ^[0-9]+$ ]]; then
-                    VALOR_EXPANSAO="${VALOR_EXPANSAO}G"
-                fi
-
                 if [[ "$VALOR_EXPANSAO" == "100%" ]]; then
                     sudo resize2fs "$ALVO_FINAL" >/dev/null 2>&1
                 else
+                    # Se for LVM, o resize2fs sem parâmetros já respeita o tamanho do LV.
                     if [[ -n "$ALVO_LVM" ]]; then
                         sudo resize2fs "$ALVO_FINAL" >/dev/null 2>&1
                     else
-                        # Removido 'local' pois não estamos dentro de uma função
-                        current_size_b=$(sudo blockdev --getsize64 "$ALVO_FINAL")
-                        sudo resize2fs "$ALVO_FINAL" "$VALOR_EXPANSAO" >/dev/null 2>&1
+                        # Cálculo para RAW/Partição: obter tamanho atual + adicional
+                        # Precisamos do tamanho atual em bytes para somar
+                        CUR_SIZE_B=$(sudo blockdev --getsize64 "$ALVO_FINAL")
+                        ADD_B=0
+                        if [[ "$VALOR_EXPANSAO" =~ [Gg]$ ]]; then
+                            ADD_B=$(echo "${VALOR_EXPANSAO%[Gg]*} * 1024 * 1024 * 1024" | bc)
+                        elif [[ "$VALOR_EXPANSAO" =~ [Mm]$ ]]; then
+                            ADD_B=$(echo "${VALOR_EXPANSAO%[Mm]*} * 1024 * 1024" | bc)
+                        elif [[ "$VALOR_EXPANSAO" =~ ^[0-9]+$ ]]; then
+                            ADD_B=$(echo "$VALOR_EXPANSAO * 1024 * 1024 * 1024" | bc)
+                        fi
+                        NEW_SIZE_B=$((CUR_SIZE_B + ADD_B))
+                        # resize2fs aceita o tamanho final em blocos ou com unidade
+                        sudo resize2fs "$ALVO_FINAL" "${NEW_SIZE_B}b" >/dev/null 2>&1
                     fi
                 fi
                 
                 if [ $? -ne 0 ]; then
                     echo "${RED}❌ ERRO: Falha ao expandir o sistema de arquivos EXT4.${RESET}"
-                    echo "Verifique se o tamanho solicitado ($VALOR_EXPANSAO) é válido e maior que o atual."
                     sleep 3
                 fi
                 ;;
