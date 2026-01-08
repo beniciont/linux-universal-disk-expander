@@ -412,8 +412,35 @@ while true; do
         
         progress 5 "Expandindo sistema de arquivos ($FSTYPE)..."
         case "$FSTYPE" in
-            xfs) sudo xfs_growfs "$ALVO_FINAL" >/dev/null 2>&1 ;;
-            ext*) sudo resize2fs "$ALVO_FINAL" >/dev/null 2>&1 ;;
+            xfs) 
+                # XFS sempre expande para o máximo do dispositivo/volume atual.
+                # Se for LVM ou Partição, o tamanho já foi limitado na camada anterior.
+                sudo xfs_growfs "$ALVO_FINAL" >/dev/null 2>&1 
+                ;;
+            ext*) 
+                if [[ "$VALOR_EXPANSAO" == "100%" ]]; then
+                    sudo resize2fs "$ALVO_FINAL" >/dev/null 2>&1
+                else
+                    # Para ext4 em modo RAW ou Partição, precisamos especificar o tamanho final.
+                    # Se for LVM, o resize2fs sem parâmetros já respeita o tamanho do LV.
+                    if [[ -n "$ALVO_LVM" ]]; then
+                        sudo resize2fs "$ALVO_FINAL" >/dev/null 2>&1
+                    else
+                        # Cálculo para RAW/Partição: obter tamanho atual + adicional
+                        local current_size_b=$(sudo blockdev --getsize64 "$ALVO_FINAL")
+                        # O resize2fs aceita o tamanho final. Como o dispositivo (partição/disco) 
+                        # já foi expandido na camada anterior, podemos apenas passar o tamanho 
+                        # que o usuário deseja que o FS ocupe.
+                        # No entanto, para simplificar e garantir compatibilidade:
+                        # Se não for LVM, o resize2fs deve ser limitado ao tamanho da partição/disco
+                        # que já foi redimensionado pelo parted ou pelo crescimento físico.
+                        
+                        # Se o usuário especificou um tamanho (ex: 10G), e não é LVM,
+                        # o resize2fs precisa saber o tamanho final.
+                        sudo resize2fs "$ALVO_FINAL" "$VALOR_EXPANSAO" >/dev/null 2>&1
+                    fi
+                fi
+                ;;
             *) echo "${YELLOW}Aviso: Sistema de arquivos '$FSTYPE' não suportado para expansão automática.${RESET}" ;;
         esac
 
