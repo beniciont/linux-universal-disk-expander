@@ -28,8 +28,7 @@ log_message() {
     
     if [ ! -f "$LOG_FILE" ]; then
         sudo touch "$LOG_FILE" 2>/dev/null
-        sudo chmod 664 "$LOG_FILE" 2>/dev/null
-        sudo chown root:adm "$LOG_FILE" 2>/dev/null
+        sudo chmod 666 "$LOG_FILE" 2>/dev/null
     fi
 
     echo "[$timestamp] [$level] [User: $USER_EXEC] - $message" | sudo tee -a "$LOG_FILE" >/dev/null 2>&1
@@ -403,39 +402,42 @@ while true; do
                 sudo xfs_growfs "$ALVO_FINAL" >/dev/null 2>&1 
                 ;;
             ext*) 
-                if [[ "$VALOR_EXPANSAO" == "100%" ]]; then
-                    sudo resize2fs "$ALVO_FINAL" >/dev/null 2>&1
+                # Para EXT4, o resize2fs é muito eficiente. 
+                # Se for 100% ou LVM, não passamos tamanho (ele pega o máximo do device/LV)
+                if [[ "$VALOR_EXPANSAO" == "100%" || -n "$ALVO_LVM" ]]; then
+                    sudo resize2fs "$ALVO_FINAL"
                 else
-                    # Se for LVM, o resize2fs sem parâmetros já respeita o tamanho do LV.
-                    if [[ -n "$ALVO_LVM" ]]; then
-                        sudo resize2fs "$ALVO_FINAL" >/dev/null 2>&1
-                    else
-                        # Cálculo para RAW/Partição: obter tamanho atual + adicional
-                        # Precisamos do tamanho atual em bytes para somar
-                        CUR_SIZE_B=$(sudo blockdev --getsize64 "$ALVO_FINAL")
-                        ADD_B=0
-                        if [[ "$VALOR_EXPANSAO" =~ [Gg]$ ]]; then
-                            ADD_B=$(echo "${VALOR_EXPANSAO%[Gg]*} * 1024 * 1024 * 1024" | bc)
-                        elif [[ "$VALOR_EXPANSAO" =~ [Mm]$ ]]; then
-                            ADD_B=$(echo "${VALOR_EXPANSAO%[Mm]*} * 1024 * 1024" | bc)
-                        elif [[ "$VALOR_EXPANSAO" =~ ^[0-9]+$ ]]; then
-                            ADD_B=$(echo "$VALOR_EXPANSAO * 1024 * 1024 * 1024" | bc)
-                        fi
-                        NEW_SIZE_B=$((CUR_SIZE_B + ADD_B))
-                        # resize2fs aceita o tamanho final em blocos ou com unidade
-                        sudo resize2fs "$ALVO_FINAL" "${NEW_SIZE_B}b" >/dev/null 2>&1
-                    fi
+                    # Se for um tamanho específico em modo RAW/Partição
+                    # O resize2fs aceita unidades como K, M, G.
+                    # Se for apenas número, o script padroniza para G
+                    [[ "$VALOR_EXPANSAO" =~ ^[0-9]+$ ]] && VALOR_EXPANSAO="${VALOR_EXPANSAO}G"
+                    sudo resize2fs "$ALVO_FINAL" "$VALOR_EXPANSAO"
                 fi
                 
                 if [ $? -ne 0 ]; then
-                    echo "${RED}❌ ERRO: Falha ao expandir o sistema de arquivos EXT4.${RESET}"
-                    sleep 3
+                    echo -e "\n${RED}❌ ERRO: Falha ao expandir o sistema de arquivos EXT4.${RESET}"
+                    echo "Tentando verificar integridade do sistema de arquivos..."
+                    # Se estiver montado, não podemos rodar e2fsck -f
+                    if mountpoint -q "$PONTO_MONTAGEM" 2>/dev/null; then
+                        echo "O sistema de arquivos está montado. Tente desmontar e rodar o script novamente se o erro persistir."
+                    else
+                        sudo e2fsck -fy "$ALVO_FINAL"
+                        sudo resize2fs "$ALVO_FINAL"
+                    fi
+                    
+                    if [ $? -ne 0 ]; then
+                        log_message "ERROR" "Falha crítica na expansão EXT4 de $ALVO_FINAL"
+                        echo "${RED}Falha crítica. A expansão não foi concluída.${RESET}"
+                        pause_nav
+                        continue 2
+                    fi
                 fi
                 ;;
             *) echo "${YELLOW}Aviso: Sistema de arquivos '$FSTYPE' não suportado para expansão automática.${RESET}" ;;
         esac
 
         echo -e "\n${GREEN}${BOLD}🎉 SUCESSO! Expansão concluída.${RESET}"
+        log_message "SUCCESS" "Expansão de $ALVO_FINAL concluída com sucesso."
         lsblk "$ALVO_FINAL"
         pause_nav
         break 2
