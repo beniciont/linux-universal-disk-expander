@@ -418,27 +418,27 @@ while true; do
                 sudo xfs_growfs "$ALVO_FINAL" >/dev/null 2>&1 
                 ;;
             ext*) 
+                # Validação de unidade: se o usuário digitar apenas números, assume 'G'
+                if [[ "$VALOR_EXPANSAO" =~ ^[0-9]+$ ]]; then
+                    VALOR_EXPANSAO="${VALOR_EXPANSAO}G"
+                fi
+
                 if [[ "$VALOR_EXPANSAO" == "100%" ]]; then
                     sudo resize2fs "$ALVO_FINAL" >/dev/null 2>&1
                 else
-                    # Para ext4 em modo RAW ou Partição, precisamos especificar o tamanho final.
-                    # Se for LVM, o resize2fs sem parâmetros já respeita o tamanho do LV.
                     if [[ -n "$ALVO_LVM" ]]; then
                         sudo resize2fs "$ALVO_FINAL" >/dev/null 2>&1
                     else
-                        # Cálculo para RAW/Partição: obter tamanho atual + adicional
-                        local current_size_b=$(sudo blockdev --getsize64 "$ALVO_FINAL")
-                        # O resize2fs aceita o tamanho final. Como o dispositivo (partição/disco) 
-                        # já foi expandido na camada anterior, podemos apenas passar o tamanho 
-                        # que o usuário deseja que o FS ocupe.
-                        # No entanto, para simplificar e garantir compatibilidade:
-                        # Se não for LVM, o resize2fs deve ser limitado ao tamanho da partição/disco
-                        # que já foi redimensionado pelo parted ou pelo crescimento físico.
-                        
-                        # Se o usuário especificou um tamanho (ex: 10G), e não é LVM,
-                        # o resize2fs precisa saber o tamanho final.
+                        # Removido 'local' pois não estamos dentro de uma função
+                        current_size_b=$(sudo blockdev --getsize64 "$ALVO_FINAL")
                         sudo resize2fs "$ALVO_FINAL" "$VALOR_EXPANSAO" >/dev/null 2>&1
                     fi
+                fi
+                
+                if [ $? -ne 0 ]; then
+                    echo "${RED}❌ ERRO: Falha ao expandir o sistema de arquivos EXT4.${RESET}"
+                    echo "Verifique se o tamanho solicitado ($VALOR_EXPANSAO) é válido e maior que o atual."
+                    sleep 3
                 fi
                 ;;
             *) echo "${YELLOW}Aviso: Sistema de arquivos '$FSTYPE' não suportado para expansão automática.${RESET}" ;;
