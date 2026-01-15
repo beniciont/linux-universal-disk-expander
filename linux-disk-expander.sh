@@ -3,12 +3,12 @@
 # ==============================================================================
 # EXPANSOR DE DISCO UNIVERSAL LINUX - MULTI-NUVEM & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 3.2.8-beta (DESENVOLVIMENTO)
-# Última Atualização: 08/01/2026 (Fix: Syntax & EXT4 Online Shrink Error)
+# Versão: 3.2.9-beta (CORRIGIDO: growpart + EXT4)
+# Última Atualização: 15/01/2026 (Fix: growpart + syntax + EXT4)
 # ==============================================================================
 
 # Configurações de Log
-LOG_FILE="/var/log/linux-disk-expander-develop.log"
+LOG_FILE="/var/log/linux-disk-expander.log"
 USER_EXEC=$(whoami)
 
 # Cores seguras com tput
@@ -36,16 +36,18 @@ log_message() {
 
 # Função para instalar dependências
 check_dependencies() {
-    local deps=("parted" "xfsprogs" "e2fsprogs" "bc" "lvm2")
+    local deps=("growpart" "parted" "xfsprogs" "e2fsprogs" "bc" "lvm2")
     
     for dep in "${deps[@]}"; do
         if ! command -v "$dep" &>/dev/null; then
             log_message "INFO" "Dependência '$dep' não encontrada. Tentando instalar..."
             if command -v yum &>/dev/null; then
-                sudo yum install -y "$dep" >/dev/null 2>&1
+                sudo yum install -y cloud-utils-growpart "$dep" >/dev/null 2>&1
             elif command -v apt-get &>/dev/null; then
                 sudo apt-get update >/dev/null 2>&1
-                sudo apt-get install -y "$dep" >/dev/null 2>&1
+                sudo apt-get install -y cloud-utils-growpart "$dep" >/dev/null 2>&1
+            elif command -v dnf &>/dev/null; then
+                sudo dnf install -y cloud-utils-growpart "$dep" >/dev/null 2>&1
             fi
         fi
     done
@@ -127,10 +129,10 @@ get_unallocated_space() {
 header() {
     clear
     echo "===================================================="
-    echo "   EXPANSOR DE DISCO UNIVERSAL LINUX v3.2.8-beta 🧪"
+    echo "   EXPANSOR DE DISCO UNIVERSAL LINUX v3.2.9-beta 🧪"
     echo "   Ferramenta para Ambientes Multi-Nuvem e Virtuais"
     echo "===================================================="
-    echo "   Criado por: Benicio Neto | Versão: 3.2.8-beta"
+    echo "   Criado por: Benicio Neto | Versão: 3.2.9-beta"
     echo "===================================================="
     echo
 }
@@ -159,7 +161,7 @@ progress() {
     echo "  ${GREEN}✅ $msg... concluído.${RESET}"
 }
 
-log_message "START" "Script Universal v3.2.6-beta iniciado."
+log_message "START" "Script Universal v3.2.9-beta iniciado."
 check_dependencies
 
 while true; do
@@ -356,23 +358,50 @@ while true; do
             *) echo "Opção inválida."; sleep 2; continue ;;
         esac
 
+        # ✅ FIX PRINCIPAL: growpart PRIMEIRO, parted como fallback
         if [[ "$MODO" == "PART" ]]; then
-            progress 5 "Expandindo partição $ALVO_NOME via parted..."
-            if [[ "$VALOR_EXPANSAO" == "100%" ]]; then
-                sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" 100%
+            progress 5 "Expandindo partição $ALVO_NOME via growpart..."
+            
+            # Tenta growpart primeiro (mais confiável)
+            if command -v growpart >/dev/null 2>&1; then
+                echo "    ${CYAN}Usando growpart (recomendado)...${RESET}"
+                sudo growpart "/dev/$DISCO" "$PART_NUM" || {
+                    echo "    ${YELLOW}growpart falhou, tentando parted...${RESET}"
+                    if [[ "$VALOR_EXPANSAO" == "100%" ]]; then
+                        sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" 100%
+                    else
+                        CUR_END=$(sudo parted -s "/dev/$DISCO" unit b print | grep -E "^ $PART_NUM" | awk '{print $3}' | tr -d 'B')
+                        ADD_B=0
+                        if [[ "$VALOR_EXPANSAO" =~ [Gg]$ ]]; then
+                            ADD_B=$(echo "${VALOR_EXPANSAO%[Gg]*} * 1024 * 1024 * 1024" | bc)
+                        elif [[ "$VALOR_EXPANSAO" =~ [Mm]$ ]]; then
+                            ADD_B=$(echo "${VALOR_EXPANSAO%[Mm]*} * 1024 * 1024" | bc)
+                        elif [[ "$VALOR_EXPANSAO" =~ ^[0-9]+$ ]]; then
+                            ADD_B=$(echo "$VALOR_EXPANSAO * 1024 * 1024 * 1024" | bc)
+                        fi
+                        NEW_END=$((CUR_END + ADD_B))
+                        sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" "${NEW_END}b"
+                    fi
+                }
             else
-                CUR_END=$(sudo parted -s "/dev/$DISCO" unit b print | grep -E "^ $PART_NUM" | awk '{print $3}' | tr -d 'B')
-                ADD_B=0
-                if [[ "$VALOR_EXPANSAO" =~ [Gg]$ ]]; then
-                    ADD_B=$(echo "${VALOR_EXPANSAO%[Gg]*} * 1024 * 1024 * 1024" | bc)
-                elif [[ "$VALOR_EXPANSAO" =~ [Mm]$ ]]; then
-                    ADD_B=$(echo "${VALOR_EXPANSAO%[Mm]*} * 1024 * 1024" | bc)
-                elif [[ "$VALOR_EXPANSAO" =~ ^[0-9]+$ ]]; then
-                    ADD_B=$(echo "$VALOR_EXPANSAO * 1024 * 1024 * 1024" | bc)
+                echo "    ${YELLOW}growpart não disponível, usando parted...${RESET}"
+                if [[ "$VALOR_EXPANSAO" == "100%" ]]; then
+                    sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" 100%
+                else
+                    CUR_END=$(sudo parted -s "/dev/$DISCO" unit b print | grep -E "^ $PART_NUM" | awk '{print $3}' | tr -d 'B')
+                    ADD_B=0
+                    if [[ "$VALOR_EXPANSAO" =~ [Gg]$ ]]; then
+                        ADD_B=$(echo "${VALOR_EXPANSAO%[Gg]*} * 1024 * 1024 * 1024" | bc)
+                    elif [[ "$VALOR_EXPANSAO" =~ [Mm]$ ]]; then
+                        ADD_B=$(echo "${VALOR_EXPANSAO%[Mm]*} * 1024 * 1024" | bc)
+                    elif [[ "$VALOR_EXPANSAO" =~ ^[0-9]+$ ]]; then
+                        ADD_B=$(echo "$VALOR_EXPANSAO * 1024 * 1024 * 1024" | bc)
+                    fi
+                    NEW_END=$((CUR_END + ADD_B))
+                    sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" "${NEW_END}b"
                 fi
-                NEW_END=$((CUR_END + ADD_B))
-                sudo parted -s "/dev/$DISCO" resizepart "$PART_NUM" "${NEW_END}b"
             fi
+            
             sudo partprobe "/dev/$DISCO"
             sudo udevadm settle
         fi
@@ -402,26 +431,14 @@ while true; do
                 sudo xfs_growfs "$ALVO_FINAL" >/dev/null 2>&1 
                 ;;
             ext*) 
-                # Para EXT4, o resize2fs é muito eficiente. 
-                # Se for 100% ou LVM, não passamos tamanho (ele pega o máximo do device/LV)
-                if [[ "$VALOR_EXPANSAO" == "100%" || -n "$ALVO_LVM" ]]; then
-                    sudo resize2fs "$ALVO_FINAL"
-                else
-                    # Se for um tamanho específico em modo RAW/Partição
-                    # O resize2fs interpreta o tamanho como o tamanho FINAL do sistema de arquivos.
-                    # Se o usuário quer adicionar 20G, precisamos somar ao tamanho atual.
-                    # Para evitar erros de 'On-line shrinking', vamos sempre tentar expandir para o máximo
-                    # do dispositivo se o modo for expansão simples.
-                    echo "${YELLOW}Aviso: Para EXT4 online, expandindo para o tamanho máximo disponível no dispositivo.${RESET}"
-                    sudo resize2fs "$ALVO_FINAL"
-                fi
-                
+                echo "${YELLOW}Expandindo EXT4 para tamanho máximo do dispositivo...${RESET}"
+                sudo resize2fs "$ALVO_FINAL"
                 RESIZE_RET=$?
                 if [ $RESIZE_RET -ne 0 ]; then
                     log_message "ERROR" "Falha ao expandir o sistema de arquivos EXT4 em $ALVO_FINAL (Exit Code: $RESIZE_RET)"
                     echo -e "\n${RED}❌ ERRO: Falha ao expandir o sistema de arquivos EXT4.${RESET}"
-                    echo "O comando resize2fs retornou erro. Verifique as mensagens acima."
                     echo "Possíveis causas: sistema de arquivos sujo ou erro de redimensionamento online."
+                    echo "Tente: sudo e2fsck -f $ALVO_FINAL && sudo resize2fs $ALVO_FINAL"
                     pause_nav
                     continue 2
                 fi
@@ -431,7 +448,9 @@ while true; do
 
         echo -e "\n${GREEN}${BOLD}🎉 SUCESSO! Expansão concluída.${RESET}"
         log_message "SUCCESS" "Expansão de $ALVO_FINAL concluída com sucesso."
-        lsblk "$ALVO_FINAL"
+        echo -e "\n${CYAN}📊 Verificação final:${RESET}"
+        lsblk "$ALVO_FINAL" -o NAME,FSTYPE,SIZE,MOUNTPOINT
+        df -h "$ALVO_FINAL" 2>/dev/null || df -h "$(lsblk -no MOUNTPOINT "$ALVO_FINAL" 2>/dev/null | head -1)" 2>/dev/null
         pause_nav
         break 2
     done
