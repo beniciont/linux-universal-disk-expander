@@ -129,7 +129,7 @@ get_unallocated_space() {
 header() {
     clear
     echo "===================================================="
-    echo "   EXPANSOR DE DISCO UNIVERSAL LINUX v3.2.9-beta 🧪"
+    echo "   EXPANSOR DE DISCO UNIVERSAL LINUX v3.2.9-beta"
     echo "   Ferramenta para Ambientes Multi-Nuvem e Virtuais"
     echo "===================================================="
     echo "   Criado por: Benicio Neto | Versão: 3.2.9-beta"
@@ -169,7 +169,7 @@ while true; do
     DISCOS=()
     mapfile -t DISCOS < <(lsblk -d -n -o NAME,TYPE | grep "disk" | awk '{print $1}')
 
-    echo "${YELLOW}📦 PASSO 1: Seleção de Disco (Block Device)${RESET}"
+    echo "${YELLOW}PASSO 1: Seleção de Disco (Block Device)${RESET}"
     echo "----------------------------------------------------"
     lsblk -d -n -o NAME,SIZE,TYPE,MODEL | grep "disk" | awk '{print "  " NR ") " $1 " " $2 " " $4}'
     echo "  q) Sair do script"
@@ -191,12 +191,12 @@ while true; do
     fi
 
     TAMANHO_INICIAL_HUMANO=$(lsblk -dno SIZE "/dev/$DISCO" | head -n1 | xargs)
-    echo -e "\n${GREEN}🎯 DISCO SELECIONADO: /dev/$DISCO ($TAMANHO_INICIAL_HUMANO)${RESET}"
+    echo -e "\n${GREEN}DISCO SELECIONADO: /dev/$DISCO ($TAMANHO_INICIAL_HUMANO)${RESET}"
     pause_nav || continue
 
     while true; do
         header
-        echo "${YELLOW}ℹ️ PASSO 2: Rescan de Barramento e Kernel${RESET}"
+        echo "${YELLOW}PASSO 2: Rescan de Barramento e Kernel${RESET}"
         echo "----------------------------------------------------"
         progress 5 "Atualizando Kernel via sysfs..."
         [ -f "/sys/class/block/$DISCO/device/rescan" ] && echo 1 | sudo tee "/sys/class/block/$DISCO/device/rescan" >/dev/null 2>&1
@@ -225,7 +225,7 @@ while true; do
         FONTE_ESPACO=$(echo "$RESULTADO_ESPACO" | cut -d':' -f4)
         PONTO_MONTAGEM=$(echo "$RESULTADO_ESPACO" | cut -d':' -f5)
 
-        echo -e "\n${CYAN}📊 Resumo de Espaço em /dev/$DISCO:${RESET}"
+        echo -e "\n${CYAN}Resumo de Espaço em /dev/$DISCO:${RESET}"
         echo "  Tamanho Total (Kernel): ${TOTAL_GB} GB"
         echo "  Tamanho Atual do FS:    ${USADO_GB} GB"
         echo "  Espaço Livre p/ Ganhar: ${LIVRE_GB} GB"
@@ -237,11 +237,11 @@ while true; do
                 "DISK_GROWTH") FONTE_DISPLAY="Crescimento do Disco Físico" ;;
                 *) FONTE_DISPLAY="Espaço Não Alocado" ;;
             esac
-            echo -e "\n${GREEN}${BOLD}✅ SUCESSO! Espaço disponível para expansão.${RESET}"
+            echo -e "\n${GREEN}${BOLD}SUCESSO! Espaço disponível para expansão.${RESET}"
             echo "  Fonte Detectada: $FONTE_DISPLAY"
             pause_nav && break || continue 2
         else
-            echo -e "\n${RED}❌ AVISO: Nenhum espaço novo detectado após o Rescan.${RESET}"
+            echo -e "\n${RED}AVISO: Nenhum espaço novo detectado após o Rescan.${RESET}"
             echo "----------------------------------------------------"
             echo "  1) Tentar Rescan novamente"
             echo "  v) Voltar ao Passo 1"
@@ -261,7 +261,7 @@ while true; do
         ALVO_LVM=""
         if [[ "$HAS_PART" == "yes" ]]; then
             header
-            echo "${CYAN}🔍 PASSO 3: Estrutura Detectada${RESET}"
+            echo "${CYAN}PASSO 3: Estrutura Detectada${RESET}"
             echo "----------------------------------------------------"
             lsblk "/dev/$DISCO" -o NAME,FSTYPE,SIZE,MOUNTPOINT,TYPE
             echo "----------------------------------------------------"
@@ -330,9 +330,9 @@ while true; do
         fi
 
         header
-        echo "${YELLOW}🚀 PASSO 4: Execução da Expansão${RESET}"
+        echo "${YELLOW}PASSO 4: Execução da Expansão${RESET}"
         echo "----------------------------------------------------"
-        [[ "$MODO" == "RAW" ]] && echo -e "${GREEN}ℹ️ MODO RAW DETECTADO (Sem Partições)${RESET}"
+        [[ "$MODO" == "RAW" ]] && echo -e "${GREEN}MODO RAW DETECTADO (Sem Partições)${RESET}"
         echo "  Alvo: $ALVO_NOME"
         [[ -n "$ALVO_LVM" ]] && echo "  LVM Alvo: $ALVO_LVM"
         [[ -n "$PONTO_MONTAGEM" ]] && echo "  Montado em: $PONTO_MONTAGEM"
@@ -436,7 +436,7 @@ while true; do
                 RESIZE_RET=$?
                 if [ $RESIZE_RET -ne 0 ]; then
                     log_message "ERROR" "Falha ao expandir o sistema de arquivos EXT4 em $ALVO_FINAL (Exit Code: $RESIZE_RET)"
-                    echo -e "\n${RED}❌ ERRO: Falha ao expandir o sistema de arquivos EXT4.${RESET}"
+                    echo -e "\n${RED}ERRO: Falha ao expandir o sistema de arquivos EXT4.${RESET}"
                     echo "Possíveis causas: sistema de arquivos sujo ou erro de redimensionamento online."
                     echo "Tente: sudo e2fsck -f $ALVO_FINAL && sudo resize2fs $ALVO_FINAL"
                     pause_nav
@@ -446,9 +446,9 @@ while true; do
             *) echo "${YELLOW}Aviso: Sistema de arquivos '$FSTYPE' não suportado para expansão automática.${RESET}" ;;
         esac
 
-        echo -e "\n${GREEN}${BOLD}🎉 SUCESSO! Expansão concluída.${RESET}"
+        echo -e "\n${GREEN}${BOLD}SUCESSO! Expansão concluída.${RESET}"
         log_message "SUCCESS" "Expansão de $ALVO_FINAL concluída com sucesso."
-        echo -e "\n${CYAN}📊 Verificação final:${RESET}"
+        echo -e "\n${CYAN}Verificação final:${RESET}"
         lsblk "$ALVO_FINAL" -o NAME,FSTYPE,SIZE,MOUNTPOINT
         df -h "$ALVO_FINAL" 2>/dev/null || df -h "$(lsblk -no MOUNTPOINT "$ALVO_FINAL" 2>/dev/null | head -1)" 2>/dev/null
         pause_nav
