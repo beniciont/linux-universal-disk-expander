@@ -3,8 +3,8 @@
 # ==============================================================================
 # EXPANSOR DE DISCO UNIVERSAL LINUX - MULTI-NUVEM & VIRTUAL
 # Criado por: Benicio Neto
-# Versão: 3.2.9-beta (CORRIGIDO: growpart + EXT4)
-# Última Atualização: 15/01/2026 (Fix: growpart + syntax + EXT4)
+# Versão: 3.3.0-beta (Smart Partition Detection)
+# Última Atualização: 18/02/2026 (Fix: Multiple partitions on same disk)
 # ==============================================================================
 
 # Configurações de Log
@@ -129,10 +129,10 @@ get_unallocated_space() {
 header() {
     clear
     echo "===================================================="
-    echo "   EXPANSOR DE DISCO UNIVERSAL LINUX v3.2.9-beta"
+    echo "   EXPANSOR DE DISCO UNIVERSAL LINUX v3.3.0-beta"
     echo "   Ferramenta para Ambientes Multi-Nuvem e Virtuais"
     echo "===================================================="
-    echo "   Criado por: Benicio Neto | Versão: 3.2.9-beta"
+    echo "   Criado por: Benicio Neto | Versão: 3.3.0-beta"
     echo "===================================================="
     echo
 }
@@ -161,7 +161,7 @@ progress() {
     echo "  ${GREEN}✅ $msg... concluído.${RESET}"
 }
 
-log_message "START" "Script Universal v3.2.9-beta iniciado."
+log_message "START" "Script Universal v3.3.0-beta iniciado."
 check_dependencies
 
 while true; do
@@ -268,7 +268,10 @@ while true; do
             MODO="PART"
             echo -e "\n${BLUE}Selecione a partição alvo:${RESET}"
             PARTS=(); mapfile -t PARTS < <(lsblk -ln -o NAME,TYPE "/dev/$DISCO" | grep "part" | awk '{print $1}')
-            for i in "${!PARTS[@]}"; do echo "  $((i+1))) /dev/${PARTS[$i]}"; done
+            for i in "${!PARTS[@]}"; do
+                P_SIZE=$(lsblk -no SIZE "/dev/${PARTS[$i]}")
+                echo "  $((i+1))) /dev/${PARTS[$i]} ($P_SIZE)"
+            done
             echo "  v) Voltar ao Passo 2"
             echo "----------------------------------------------------"
             echo -n "Escolha o número: "; read P_IDX
@@ -279,6 +282,23 @@ while true; do
             
             ALVO_NOME="/dev/$PART_ESCOLHIDA"
             PART_NUM=$(echo "$PART_ESCOLHIDA" | grep -oE "[0-9]+$" | tail -1)
+
+            # ✅ SMART DETECTION: Verificar se é a última partição
+            LAST_PART_NAME=$(lsblk -ln -o NAME "/dev/$DISCO" | grep "part" | tail -n1)
+            if [[ "$PART_ESCOLHIDA" != "$LAST_PART_NAME" ]]; then
+                echo -e "\n${YELLOW}AVISO: /dev/$PART_ESCOLHIDA não é a última partição do disco.${RESET}"
+                echo "O espaço livre físico só pode ser adicionado à última partição (/dev/$LAST_PART_NAME)."
+                echo -e "Deseja mudar o alvo para ${CYAN}/dev/$LAST_PART_NAME${RESET} para capturar o novo espaço?"
+                echo -n "(s/n): "
+                read MUDAR_ALVO
+                if [[ ${MUDAR_ALVO,,} == 's' ]]; then
+                    PART_ESCOLHIDA=$LAST_PART_NAME
+                    ALVO_NOME="/dev/$PART_ESCOLHIDA"
+                    PART_NUM=$(echo "$PART_ESCOLHIDA" | grep -oE "[0-9]+$" | tail -1)
+                    echo -e "${GREEN}Alvo alterado para $ALVO_NOME${RESET}"
+                    sleep 1
+                fi
+            fi
             
             if lsblk -no FSTYPE "$ALVO_NOME" | grep -qi "LVM"; then
                 HAS_LVM="yes"

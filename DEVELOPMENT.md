@@ -2,7 +2,7 @@
 
 Este arquivo descreve o fluxo de trabalho para novas funcionalidades e o estado atual da branch de desenvolvimento (`develop`).
 
-## 🚀 Versão em Teste: v3.2.9-beta
+## 🚀 Versão em Teste: v3.3.0-beta
 
 ### Objetivo
 Tornar o script **Universal e Agnóstico**, permitindo a expansão de discos em qualquer ambiente Linux, independentemente do hipervisor ou nuvem.
@@ -13,6 +13,7 @@ Tornar o script **Universal e Agnóstico**, permitindo a expansão de discos em 
 - [x] **Compatibilidade Multi-Cloud:** Validar rescan em instâncias Azure e AWS.
 - [x] **Prioridade growpart**: O script agora prioriza o uso do `growpart` para expansão de partições, com fallback para `parted`.
 - [x] **Correção EXT4**: Melhoria na lógica de redimensionamento online para sistemas de arquivos EXT4.
+- [ ] **Detecção Inteligente de Partição**: Implementar e validar a detecção e sugestão da última partição disponível no disco para expansão, mesmo que outra partição seja inicialmente selecionada.
 
 ---
 
