@@ -1,12 +1,12 @@
 # Linux Universal Disk Expander 🚀
 
-![Version](https://img.shields.io/badge/version-3.2.0--beta-orange)
+![Version](https://img.shields.io/badge/version-3.2.9--beta-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Platform](https://img.shields.io/badge/platform-Linux-lightgrey)
 
-Ferramenta universal e agnóstica para expansão segura de discos, partições e volumes LVM em qualquer ambiente Linux (Cloud ou On-premise). Esta branch contém a versão **v3.2.0-beta**, focada em compatibilidade **Multi-Cloud** e **Virtualização**.
+Ferramenta universal e agnóstica para expansão segura de discos, partições e volumes LVM em qualquer ambiente Linux (Cloud ou On-premise). Esta branch contém a versão **v3.2.9-beta**, focada em compatibilidade **Multi-Cloud** e **Virtualização**.
 
-## 📋 Funcionalidades em Teste (v3.2.0-beta)
+## 📋 Funcionalidades em Teste (v3.2.9-beta)
 - **Rescan Agnóstico**: Lógica inteligente para detectar novos espaços em **Proxmox, VMware, Hyper-V, Azure e AWS**.
 - **Detecção de Ambiente**: Identifica automaticamente o provedor para aplicar o melhor método de Rescan.
 - **Bus Scan SCSI**: Varredura profunda de barramentos SCSI para hipervisores locais.
